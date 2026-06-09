@@ -1,4 +1,4 @@
-"""Phase 1 LangGraph workflow for planning and safety review."""
+"""LangGraph workflow for planning, approval, and AWS tool execution."""
 
 import json
 import os
@@ -6,7 +6,13 @@ import re
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from dotenv import load_dotenv
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
@@ -15,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from app.services.aws_tools import get_all_aws_tools
 from app.services.jury.jury_config import JuryConfig
 from app.services.jury.jury_engine import JuryEngine
+from app.services.session_store import SessionStore
 from app.utils.logging_decorator import get_logger
 
 
@@ -47,6 +54,7 @@ class _PlanStep(BaseModel):
     tool_name: str = Field(min_length=1)
     tool_description: str
     parameters_needed: list[str]
+    parameters: dict[str, Any] = Field(default_factory=dict)
     risk_level: Literal["low", "medium", "high"]
     reason: str = Field(min_length=1)
 
@@ -81,6 +89,7 @@ async def planner_node(state: AgentState) -> AgentState:
         return cast(
             AgentState,
             {
+                "user_message": "",
                 "plan": plan,
                 "plan_approved": False,
                 "jury_verdict": None,
@@ -100,6 +109,7 @@ async def planner_node(state: AgentState) -> AgentState:
         return cast(
             AgentState,
             {
+                "user_message": "",
                 "plan": None,
                 "plan_approved": False,
                 "jury_verdict": None,
@@ -200,15 +210,215 @@ def format_plan_for_user(state: AgentState) -> str:
     return "\n".join(lines)
 
 
+def approval_router(
+    state: AgentState,
+) -> Literal["executor_node", "planner_node", END]:
+    """Route an approved plan to execution or a refinement back to planning."""
+    if state.get("current_phase") == "error" or state.get("error"):
+        return END
+    if state.get("plan_approved") is True:
+        return "executor_node"
+    if _contains_refinement(state.get("user_message", "")):
+        return "planner_node"
+    return END
+
+
+async def executor_node(state: AgentState) -> AgentState:
+    """Execute every approved plan step, recording failures without aborting."""
+    tools_by_name = {tool.name: tool for tool in get_all_aws_tools()}
+    results = list(state.get("execution_results") or [])
+
+    try:
+        credentials = session_store.get_credentials(state["session_id"])
+    except Exception as exc:
+        logger.error(
+            "Failed to load AWS credentials",
+            extra={
+                "session_id": state.get("session_id"),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return cast(
+            AgentState,
+            {
+                "execution_results": results,
+                "current_phase": "error",
+                "error": f"Failed to load AWS credentials: {exc}",
+            },
+        )
+
+    for index, step in enumerate(state.get("plan") or [], start=1):
+        step_number = step.get("step_number", index)
+        tool_name = str(step.get("tool_name", ""))
+        try:
+            tool = tools_by_name.get(tool_name)
+            if tool is None:
+                raise ValueError(f"Unknown AWS tool: {tool_name}")
+
+            parameters = step.get("parameters") or {}
+            if not isinstance(parameters, dict):
+                raise ValueError("Plan step parameters must be an object")
+
+            result = tool.invoke({**parameters, **credentials})
+            results.append(
+                {
+                    "step": step_number,
+                    "tool": tool_name,
+                    "status": "success",
+                    "result": _serialize_result(result),
+                }
+            )
+        except Exception as exc:
+            logger.error(
+                "AWS plan step failed",
+                extra={
+                    "session_id": state.get("session_id"),
+                    "step": step_number,
+                    "tool": tool_name,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            results.append(
+                {
+                    "step": step_number,
+                    "tool": tool_name,
+                    "status": "error",
+                    "result": str(exc),
+                }
+            )
+
+    return cast(
+        AgentState,
+        {
+            "execution_results": results,
+            "current_phase": "done",
+            "error": None,
+        },
+    )
+
+
+async def results_formatter_node(state: AgentState) -> AgentState:
+    """Append a concise execution summary for the user."""
+    results = state.get("execution_results") or []
+    succeeded = sum(item.get("status") == "success" for item in results)
+    details = [
+        f"Step {item.get('step', '?')} ({item.get('tool', 'unknown')}): "
+        f"{item.get('status', 'unknown')} - {item.get('result')}"
+        for item in results
+    ]
+    summary = (
+        f"✅ Completed {succeeded}/{len(results)} steps. Here's what happened:"
+    )
+    if details:
+        summary = f"{summary}\n" + "\n".join(details)
+    return cast(AgentState, {"messages": [AIMessage(content=summary)]})
+
+
 def create_agent_graph() -> CompiledStateGraph:
-    """Compile the Phase 1 planning and jury-review graph."""
+    """Compile the complete checkpointed planning and execution graph."""
     workflow = StateGraph(AgentState)
     workflow.add_node("planner_node", planner_node)
     workflow.add_node("jury_node", jury_node)
+    workflow.add_node("executor_node", executor_node)
+    workflow.add_node("results_formatter_node", results_formatter_node)
     workflow.add_edge(START, "planner_node")
     workflow.add_edge("planner_node", "jury_node")
-    workflow.add_edge("jury_node", END)
-    return workflow.compile(interrupt_after=["jury_node"])
+    workflow.add_conditional_edges(
+        "jury_node",
+        approval_router,
+        {
+            "executor_node": "executor_node",
+            "planner_node": "planner_node",
+            END: END,
+        },
+    )
+    workflow.add_edge("executor_node", "results_formatter_node")
+    workflow.add_edge("results_formatter_node", END)
+    return workflow.compile(
+        checkpointer=MemorySaver(),
+        interrupt_before=["executor_node"],
+    )
+
+
+session_store = SessionStore(
+    backend=cast(
+        Literal["memory", "redis"],
+        os.getenv("SESSION_STORE_BACKEND", "memory"),
+    )
+)
+agent_graph = create_agent_graph()
+
+
+async def run_agent(
+    session_id: str, user_message: str, plan_approved: bool = False
+) -> dict:
+    """Single entry point for both planning and execution phases."""
+    history = session_store.get_messages(session_id)
+    config = {"configurable": {"thread_id": session_id}}
+    snapshot = await agent_graph.aget_state(config)
+
+    is_active_checkpoint = (
+        bool(snapshot.values)
+        and snapshot.values.get("current_phase") != "done"
+        and not (
+            snapshot.values.get("current_phase") == "error"
+            and not plan_approved
+        )
+    )
+    if is_active_checkpoint:
+        await agent_graph.aupdate_state(
+            config,
+            {
+                "user_message": user_message,
+                "plan_approved": plan_approved,
+                "current_phase": (
+                    "executing" if plan_approved else "awaiting_approval"
+                ),
+                "error": None,
+            },
+            as_node="jury_node",
+        )
+        state = await agent_graph.ainvoke(None, config=config)
+        if plan_approved and state.get("current_phase") != "done":
+            state = await agent_graph.ainvoke(None, config=config)
+    else:
+        messages = [_stored_message(item) for item in history]
+        messages.append(HumanMessage(content=user_message))
+        initial_state: AgentState = {
+            "session_id": session_id,
+            "user_message": user_message,
+            "messages": messages,
+            "plan": None,
+            "plan_approved": plan_approved,
+            "execution_results": [],
+            "jury_verdict": None,
+            "current_phase": "planning",
+            "error": None,
+        }
+        state = await agent_graph.ainvoke(initial_state, config=config)
+
+    phase = state.get("current_phase", "error")
+    if phase == "done":
+        message = _latest_message_text(state)
+        results = state.get("execution_results") or []
+        response = {
+            "phase": phase,
+            "results": results,
+            "message": message,
+        }
+    else:
+        message = format_plan_for_user(state)
+        response = {
+            "phase": phase,
+            "plan": state.get("plan"),
+            "message": message,
+        }
+
+    session_store.append_message(session_id, "user", user_message)
+    session_store.append_message(session_id, "assistant", message)
+    return response
 
 
 def _build_planner_llm() -> Any:
@@ -264,7 +474,8 @@ def _planner_system_prompt(tool_catalog: str) -> str:
         "Return ONLY a valid JSON list. Each step must contain exactly: "
         '"step_number" (integer starting at 1), "tool_name" (listed tool), '
         '"tool_description" (short string), "parameters_needed" (list of '
-        'parameter names), "risk_level" ("low", "medium", or "high"), and '
+        'parameter names), "parameters" (object containing the corresponding '
+        'values), "risk_level" ("low", "medium", or "high"), and '
         '"reason" (short string). Order steps by execution dependency. Never '
         "include AWS credentials in parameters_needed because the application "
         "injects them at execution time. If the request needs no AWS action, "
@@ -324,3 +535,35 @@ def _parse_json_response(content: str) -> list[dict]:
     if not isinstance(parsed, list):
         raise ValueError("Planner response must be a JSON list")
     return parsed
+
+
+def _contains_refinement(message: str) -> bool:
+    normalized = message.strip().lower()
+    if not normalized:
+        return False
+    approval_words = {"approve", "approved", "yes", "proceed", "execute"}
+    return normalized not in approval_words
+
+
+def _serialize_result(result: Any) -> Any:
+    if isinstance(result, BaseModel):
+        return result.model_dump()
+    try:
+        json.dumps(result)
+        return result
+    except (TypeError, ValueError):
+        return str(result)
+
+
+def _stored_message(message: dict[str, str]) -> BaseMessage:
+    content = message.get("content", "")
+    if message.get("role") == "assistant":
+        return AIMessage(content=content)
+    return HumanMessage(content=content)
+
+
+def _latest_message_text(state: AgentState) -> str:
+    messages = state.get("messages") or []
+    if not messages:
+        return ""
+    return _response_text(messages[-1])
