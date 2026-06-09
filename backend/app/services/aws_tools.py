@@ -799,7 +799,7 @@ def create_s3_bucket(
         s3_client.create_bucket(**create_args)
 
         return CreateBucketOutput(
-            status="Bucket created successfully.",
+            status="success",
             bucket_name=bucket_name,
             region=region
         )

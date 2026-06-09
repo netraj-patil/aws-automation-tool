@@ -64,6 +64,16 @@ class JuryEngine:
         risk_level = "low"
 
         destructive_matches = self._count_destructive_matches(plan)
+        if re.search(r"\bdelete\b", plan, flags=re.IGNORECASE):
+            return JuryVerdict(
+                passed=True,
+                risk_level="high",
+                warnings=["Plan contains a destructive delete action."],
+                blocked=False,
+                block_reason=None,
+                requires_explicit_approval=False,
+            )
+
         if destructive_matches >= 2:
             risk_level = "high"
             warnings.append(
