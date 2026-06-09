@@ -1,11 +1,17 @@
 """LangGraph workflow for planning, approval, and AWS tool execution."""
 
+# LLM CONFIGURATION
+# Planner: gemini-2.5-flash via langchain-google-genai (GEMINI_API_KEY)
+# Jury: Groq via langchain-groq (GROQ_API_KEY or GROK_API_KEY)
+# Last smoke tested: 2026-06-09
+
 import json
 import os
 import re
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -413,41 +419,19 @@ async def run_agent(
 
 
 def _build_planner_llm() -> Any:
-    provider = os.getenv("PLANNER_MODEL_PROVIDER", "gemini").lower()
-    if provider == "gemini":
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-        except ImportError as exc:
-            raise RuntimeError(
-                "The 'langchain-google-genai' package is required for Gemini"
-            ) from exc
-
-        api_key = _required_env("GEMINI_API_KEY")
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    google_api_key = os.environ.pop("GOOGLE_API_KEY", None)
+    try:
         return ChatGoogleGenerativeAI(
-            model=os.getenv("PLANNER_MODEL_GEMINI", "gemini-2.0-flash"),
-            google_api_key=api_key,
-            temperature=0,
+            model="gemini-2.5-flash",
+            api_key=gemini_api_key,
+            temperature=0.1,
+            timeout=30,
+            max_retries=1,
         )
-
-    if provider == "grok":
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as exc:
-            raise RuntimeError(
-                "The 'langchain-openai' package is required for Grok"
-            ) from exc
-
-        api_key = _required_env("GROK_API_KEY")
-        return ChatOpenAI(
-            base_url="https://api.x.ai/v1",
-            api_key=api_key,
-            model=os.getenv("PLANNER_MODEL_GROK", "grok-3"),
-            temperature=0,
-        )
-
-    raise ValueError(
-        "PLANNER_MODEL_PROVIDER must be either 'gemini' or 'grok'"
-    )
+    finally:
+        if google_api_key is not None:
+            os.environ["GOOGLE_API_KEY"] = google_api_key
 
 
 def _build_tool_catalog(tools: list[Any]) -> str:

@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.utils.logging_decorator import get_logger
@@ -21,11 +21,10 @@ class JuryConfig(BaseSettings):
         populate_by_name=True,
     )
 
-    gemini_api_key: str = Field(validation_alias="GEMINI_API_KEY")
-    grok_api_key: str = Field(validation_alias="GROK_API_KEY")
-    jury_model_provider: Literal["gemini", "grok"] = "gemini"
-    jury_model_gemini: str = "gemini-2.0-flash"
-    jury_model_grok: str = "grok-3-mini"
+    groq_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GROQ_API_KEY", "GROK_API_KEY"),
+    )
     destructive_keywords: list[str] = Field(
         default_factory=lambda: [
             "delete",

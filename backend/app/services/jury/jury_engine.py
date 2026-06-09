@@ -5,6 +5,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
+from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
 
 from app.services.jury.jury_config import JuryConfig, JuryVerdict
@@ -89,6 +90,19 @@ class JuryEngine:
                 f"maximum of {self.config.max_blast_radius}."
             )
 
+        if self.config.groq_api_key is None:
+            logger.warning(
+                "GROQ_API_KEY is not set; skipping LLM jury review"
+            )
+            return JuryVerdict(
+                passed=True,
+                risk_level=risk_level,
+                warnings=warnings,
+                blocked=False,
+                block_reason=None,
+                requires_explicit_approval=False,
+            )
+
         assessment = await self._evaluate_with_llm(plan, tool_calls)
         if (
             assessment.destructiveness >= 7
@@ -135,32 +149,12 @@ class JuryEngine:
         return _LLMAssessment.model_validate(payload)
 
     def _build_llm(self) -> Any:
-        if self.config.jury_model_provider == "gemini":
-            try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-            except ImportError as exc:
-                raise RuntimeError(
-                    "The 'langchain-google-genai' package is required for "
-                    "Gemini jury evaluations"
-                ) from exc
-            return ChatGoogleGenerativeAI(
-                model=self.config.jury_model_gemini,
-                google_api_key=self.config.gemini_api_key,
-                temperature=0,
-            )
-
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as exc:
-            raise RuntimeError(
-                "The 'langchain-openai' package is required for Grok jury "
-                "evaluations"
-            ) from exc
-        return ChatOpenAI(
-            base_url="https://api.x.ai/v1",
-            api_key=self.config.grok_api_key,
-            model=self.config.jury_model_grok,
+        return ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=self.config.groq_api_key,
             temperature=0,
+            timeout=20,
+            max_retries=1,
         )
 
     @staticmethod

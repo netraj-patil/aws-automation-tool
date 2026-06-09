@@ -21,8 +21,7 @@ class _FakeLLM:
 
 def _config(**overrides: object) -> JuryConfig:
     values = {
-        "gemini_api_key": "gemini-test-key",
-        "grok_api_key": "grok-test-key",
+        "groq_api_key": "groq-test-key",
     }
     values.update(overrides)
     return JuryConfig(**values)
@@ -86,6 +85,24 @@ def test_critical_llm_score_requires_approval() -> None:
     assert verdict.risk_level == "critical"
     assert verdict.requires_explicit_approval is True
     assert verdict.warnings == ["Destructive operation."]
+
+
+def test_missing_groq_key_returns_low_risk_without_llm() -> None:
+    engine = JuryEngine(JuryConfig())
+
+    def fail_if_called() -> object:
+        raise AssertionError("LLM must not be built without GROQ_API_KEY")
+
+    engine._build_llm = fail_if_called  # type: ignore[method-assign]
+    verdict = asyncio.run(
+        engine.evaluate_plan(
+            "List the available buckets.",
+            [{"name": "list_s3_buckets"}],
+        )
+    )
+
+    assert verdict.risk_level == "low"
+    assert verdict.requires_explicit_approval is False
 
 
 def test_metrics_records_and_returns_a_copy() -> None:

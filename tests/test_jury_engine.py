@@ -6,8 +6,7 @@ from app.services.jury.jury_engine import JuryEngine
 
 def _config(**overrides) -> JuryConfig:
     values = {
-        "gemini_api_key": "test-gemini-key",
-        "grok_api_key": "test-grok-key",
+        "groq_api_key": "test-groq-key",
     }
     values.update(overrides)
     return JuryConfig(**values)
