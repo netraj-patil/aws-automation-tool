@@ -183,16 +183,16 @@ def format_plan_for_user(state: AgentState) -> str:
         return f"Unable to prepare the plan: {state.get('error') or 'Unknown error'}"
 
     plan = state.get("plan") or []
-    lines = ["📋 Here's what I plan to do:"]
+    lines = ["Here's what I plan to do:"]
     if not plan:
         lines.append("No actions are required.")
 
     for step in plan:
         lines.append(
             f"Step {step.get('step_number', '?')}: "
-            f"{step.get('tool_name', 'unknown_tool')} — "
+            f"{step.get('tool_name', 'unknown_tool')} - "
             f"{step.get('reason', 'No reason provided.')}  "
-            f"⚠️ Risk: {str(step.get('risk_level', 'unknown')).lower()}"
+            f"Risk: {str(step.get('risk_level', 'unknown')).lower()}"
         )
 
     verdict = state.get("jury_verdict")
@@ -263,7 +263,24 @@ async def executor_node(state: AgentState) -> AgentState:
             if not isinstance(parameters, dict):
                 raise ValueError("Plan step parameters must be an object")
 
-            result = tool.invoke({**parameters, **credentials})
+            input_fields = _tool_input_fields(tool)
+            candidate_inputs = {**parameters, **credentials}
+            tool_inputs = {
+                key: value
+                for key, value in candidate_inputs.items()
+                if key in input_fields
+            }
+            logger.info(
+                "Invoking AWS tool",
+                extra={
+                    "session_id": state.get("session_id"),
+                    "step": step_number,
+                    "tool": tool_name,
+                    "input_fields": sorted(tool_inputs),
+                    "credential_source": "SessionStore",
+                },
+            )
+            result = tool.invoke(tool_inputs)
             results.append(
                 {
                     "step": step_number,
@@ -312,7 +329,7 @@ async def results_formatter_node(state: AgentState) -> AgentState:
         for item in results
     ]
     summary = (
-        f"✅ Completed {succeeded}/{len(results)} steps. Here's what happened:"
+        f"Completed {succeeded}/{len(results)} steps. Here's what happened:"
     )
     if details:
         summary = f"{summary}\n" + "\n".join(details)
@@ -528,6 +545,14 @@ def _serialize_result(result: Any) -> Any:
         return result
     except (TypeError, ValueError):
         return str(result)
+
+
+def _tool_input_fields(tool: Any) -> set[str]:
+    args_schema = getattr(tool, "args_schema", None)
+    model_fields = getattr(args_schema, "model_fields", None)
+    if not isinstance(model_fields, dict):
+        raise ValueError(f"AWS tool {tool.name} has no valid input schema")
+    return set(model_fields)
 
 
 def _stored_message(message: dict[str, str]) -> BaseMessage:

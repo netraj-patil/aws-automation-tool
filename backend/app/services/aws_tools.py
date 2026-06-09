@@ -118,6 +118,16 @@ class ListS3BucketsInput(BaseModel):
     """Input schema for listing S3 buckets."""
     aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
     aws_secret_access_key: str = Field(..., description="AWS secret access key for authentication.")
+
+
+class ListRunningEC2InstancesInput(BaseModel):
+    """Input schema for listing running EC2 instances in a region."""
+
+    region: str = Field(..., description="AWS region to query.")
+    aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
+    aws_secret_access_key: str = Field(..., description="AWS secret access key for authentication.")
+
+
 #==================================================================================================
 #resource ecplorer
 #=====================================================================================================
@@ -400,6 +410,7 @@ class AttachInstanceProfileOutput(BaseModel):
 def get_all_aws_tools():
     return [
         list_s3_buckets,
+        list_running_ec2_instances,
         get_bucket_region,
         set_s3_bucket_policy,
         enable_s3_versioning,
@@ -441,6 +452,57 @@ def list_s3_buckets(aws_access_key_id: str, aws_secret_access_key: str):
 
     response = s3_client.list_buckets()
     return [bucket['Name'] for bucket in response['Buckets']]
+
+
+@tool(args_schema=ListRunningEC2InstancesInput, return_direct=False)
+def list_running_ec2_instances(
+    region: str,
+    aws_access_key_id: str,
+    aws_secret_access_key: str,
+) -> list[dict]:
+    """List running EC2 instances in the specified AWS region."""
+    ec2_client = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region,
+    )
+    instances = []
+    paginator = ec2_client.get_paginator("describe_instances")
+    for page in paginator.paginate(
+        Filters=[
+            {
+                "Name": "instance-state-name",
+                "Values": ["running"],
+            }
+        ]
+    ):
+        for reservation in page.get("Reservations", []):
+            for instance in reservation.get("Instances", []):
+                name = next(
+                    (
+                        tag.get("Value")
+                        for tag in instance.get("Tags", [])
+                        if tag.get("Key") == "Name"
+                    ),
+                    None,
+                )
+                instances.append(
+                    {
+                        "instance_id": instance.get("InstanceId"),
+                        "name": name,
+                        "instance_type": instance.get("InstanceType"),
+                        "state": instance.get("State", {}).get("Name"),
+                        "availability_zone": instance.get(
+                            "Placement", {}
+                        ).get("AvailabilityZone"),
+                        "private_ip_address": instance.get(
+                            "PrivateIpAddress"
+                        ),
+                        "public_ip_address": instance.get("PublicIpAddress"),
+                    }
+                )
+    return instances
 
 
 @tool(args_schema=GetBucketRegionInput, return_direct=False)

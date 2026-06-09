@@ -55,6 +55,66 @@ def test_list_s3_buckets_invalid_credentials(
     assert exc_info.value.response["Error"]["Code"] == "InvalidAccessKeyId"
 
 
+def test_list_running_ec2_instances_uses_region_and_filter(
+    mocker, fake_credentials
+) -> None:
+    paginator = MagicMock()
+    paginator.paginate.return_value = [
+        {
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-0123456789",
+                            "InstanceType": "t3.micro",
+                            "State": {"Name": "running"},
+                            "Placement": {
+                                "AvailabilityZone": "us-east-1a"
+                            },
+                            "PrivateIpAddress": "10.0.0.10",
+                            "Tags": [{"Key": "Name", "Value": "web"}],
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+    ec2 = MagicMock()
+    ec2.get_paginator.return_value = paginator
+    client = mocker.patch.object(
+        aws_tools.boto3, "client", return_value=ec2
+    )
+
+    result = aws_tools.list_running_ec2_instances.invoke(fake_credentials)
+
+    client.assert_called_once_with(
+        "ec2",
+        aws_access_key_id="AKIATEST",
+        aws_secret_access_key="fakesecret",
+        region_name="us-east-1",
+    )
+    ec2.get_paginator.assert_called_once_with("describe_instances")
+    paginator.paginate.assert_called_once_with(
+        Filters=[
+            {
+                "Name": "instance-state-name",
+                "Values": ["running"],
+            }
+        ]
+    )
+    assert result == [
+        {
+            "instance_id": "i-0123456789",
+            "name": "web",
+            "instance_type": "t3.micro",
+            "state": "running",
+            "availability_zone": "us-east-1a",
+            "private_ip_address": "10.0.0.10",
+            "public_ip_address": None,
+        }
+    ]
+
+
 def test_create_s3_bucket_success(mocker, fake_credentials) -> None:
     s3 = MagicMock()
     mocker.patch.object(aws_tools.boto3, "client", return_value=s3)

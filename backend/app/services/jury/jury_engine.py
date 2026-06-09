@@ -103,7 +103,26 @@ class JuryEngine:
                 requires_explicit_approval=False,
             )
 
-        assessment = await self._evaluate_with_llm(plan, tool_calls)
+        try:
+            assessment = await self._evaluate_with_llm(plan, tool_calls)
+        except Exception as exc:
+            logger.warning(
+                "Groq jury review failed; using deterministic verdict",
+                extra={
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "risk_level": risk_level,
+                },
+            )
+            return JuryVerdict(
+                passed=True,
+                risk_level=risk_level,
+                warnings=warnings,
+                blocked=False,
+                block_reason=None,
+                requires_explicit_approval=False,
+            )
+
         if (
             assessment.destructiveness >= 7
             or assessment.blast_radius >= 7

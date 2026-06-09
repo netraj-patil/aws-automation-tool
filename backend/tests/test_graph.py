@@ -42,11 +42,21 @@ class _FakeTool:
     description = "List S3 buckets"
 
     def __init__(
-        self, result: object = None, error: Exception | None = None
+        self,
+        result: object = None,
+        error: Exception | None = None,
+        input_fields: set[str] | None = None,
     ) -> None:
         self.result = result
         self.error = error
         self.payloads: list[dict] = []
+        fields = input_fields or {
+            "aws_access_key_id",
+            "aws_secret_access_key",
+        }
+        self.args_schema = SimpleNamespace(
+            model_fields={field: object() for field in fields}
+        )
 
     def invoke(self, payload: dict) -> object:
         self.payloads.append(payload)
@@ -190,7 +200,14 @@ def test_approval_router() -> None:
 
 def test_executor_injects_credentials_and_continues(monkeypatch) -> None:
     successful = _FakeTool(result=["bucket-a"])
-    failing = _FakeTool(error=RuntimeError("AWS unavailable"))
+    failing = _FakeTool(
+        error=RuntimeError("AWS unavailable"),
+        input_fields={
+            "bucket_name",
+            "aws_access_key_id",
+            "aws_secret_access_key",
+        },
+    )
     failing.name = "get_bucket_region"
     monkeypatch.setattr(
         graph, "get_all_aws_tools", lambda: [successful, failing]
@@ -201,6 +218,7 @@ def test_executor_injects_credentials_and_continues(monkeypatch) -> None:
         lambda session_id: {
             "aws_access_key_id": "stored-key",
             "aws_secret_access_key": "stored-secret",
+            "region": "ap-south-1",
         },
     )
     state = _state()
@@ -227,6 +245,7 @@ def test_executor_injects_credentials_and_continues(monkeypatch) -> None:
         "error",
     ]
     assert successful.payloads[0]["aws_access_key_id"] == "stored-key"
+    assert "region" not in successful.payloads[0]
     assert failing.payloads[0]["bucket_name"] == "bucket-a"
 
 
@@ -243,7 +262,7 @@ def test_results_formatter_appends_summary() -> None:
 
     update = asyncio.run(graph.results_formatter_node(state))
 
-    assert "✅ Completed 1/1 steps" in update["messages"][0].content
+    assert "Completed 1/1 steps" in update["messages"][0].content
 
 
 def test_run_agent_resumes_checkpoint_for_approval(monkeypatch) -> None:

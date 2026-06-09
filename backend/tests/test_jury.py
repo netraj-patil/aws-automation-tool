@@ -105,6 +105,27 @@ def test_missing_groq_key_returns_low_risk_without_llm() -> None:
     assert verdict.requires_explicit_approval is False
 
 
+def test_groq_failure_returns_deterministic_verdict() -> None:
+    engine = JuryEngine(_config())
+
+    async def fail_review(
+        plan: str, tool_calls: list[dict]
+    ) -> object:
+        raise RuntimeError("Groq unavailable")
+
+    engine._evaluate_with_llm = fail_review  # type: ignore[method-assign]
+    verdict = asyncio.run(
+        engine.evaluate_plan(
+            "List the available buckets.",
+            [{"name": "list_s3_buckets"}],
+        )
+    )
+
+    assert verdict.risk_level == "low"
+    assert verdict.requires_explicit_approval is False
+    assert verdict.blocked is False
+
+
 def test_metrics_records_and_returns_a_copy() -> None:
     metrics = JuryMetrics()
     metrics.record(
