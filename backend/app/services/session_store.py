@@ -3,7 +3,7 @@
 import json
 import os
 import time
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from app.utils.logging_decorator import get_logger
 
@@ -140,3 +140,11 @@ class SessionStore:
     def _touch(self, session_id: str, session: dict[str, Any]) -> None:
         session["last_active"] = self._timestamp()
         self._save(session_id, session)
+
+
+session_store = SessionStore(
+    backend=cast(
+        Literal["memory", "redis"],
+        os.getenv("SESSION_STORE_BACKEND", "memory"),
+    )
+)

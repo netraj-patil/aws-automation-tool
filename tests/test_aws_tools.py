@@ -1,3 +1,5 @@
+"""Tests for AWS tool behavior and credential parameter consistency."""
+
 from unittest.mock import MagicMock
 
 import pytest

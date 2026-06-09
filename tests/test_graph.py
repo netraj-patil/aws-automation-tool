@@ -1,3 +1,5 @@
+"""API-level tests for the planning and approval workflow."""
+
 from fastapi.testclient import TestClient
 
 from app.main import app

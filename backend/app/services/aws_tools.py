@@ -1,12 +1,18 @@
+"""LangChain tools and schemas for supported AWS automation operations."""
+
 import json
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
-# from app.utils.logging_decorator import logger
 import boto3
 from langchain_core.tools import tool
 import os
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError
+
+from app.utils.logging_decorator import get_logger
+
+
+logger = get_logger(__name__)
 ##EC2 TOOL WITH boto3 client As ec2. 
 
 load_dotenv()
@@ -948,7 +954,10 @@ def create_access_key_for_user(
     except ClientError as e:
         # Handle known AWS errors, like user not found or key limit exceeded.
         error_message = e.response['Error']['Message']
-        print(f"Error: {e}")
+        logger.exception(
+            "Failed to create IAM access key",
+            extra={"user_name": user_name, "error": str(e)},
+        )
         return CreateAccessKeyOutput(
             new_access_key_id="",
             new_secret_access_key="",
@@ -958,7 +967,10 @@ def create_access_key_for_user(
         
     except Exception as e:
         # Handle other unexpected errors.
-        print(f"Error: {e}")
+        logger.exception(
+            "Unexpected IAM access key creation failure",
+            extra={"user_name": user_name, "error": str(e)},
+        )
         return CreateAccessKeyOutput(
             new_access_key_id="",
             new_secret_access_key="",

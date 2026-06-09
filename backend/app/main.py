@@ -12,13 +12,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.routes.agent_routes import router
-from app.services import graph
+from app.services.session_store import session_store
 from app.utils.logging_decorator import get_logger
 
 
 load_dotenv()
 logger = get_logger(__name__)
-session_store = graph.session_store
 
 
 @asynccontextmanager

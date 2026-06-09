@@ -1,3 +1,5 @@
+"""Tests for in-memory session lifecycle and error handling."""
+
 import pytest
 
 from app.services.session_store import SessionNotFoundError

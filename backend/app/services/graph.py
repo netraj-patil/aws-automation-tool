@@ -19,9 +19,8 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.services.aws_tools import get_all_aws_tools
-from app.services.jury.jury_config import JuryConfig
-from app.services.jury.jury_engine import JuryEngine
-from app.services.session_store import SessionStore
+from app.services.jury.jury_engine import get_jury_engine
+from app.services.session_store import session_store
 from app.utils.logging_decorator import get_logger
 
 
@@ -132,9 +131,7 @@ async def jury_node(state: AgentState) -> AgentState:
             for step in plan
             if isinstance(step.get("tool_name"), str)
         ]
-        verdict = await JuryEngine(JuryConfig()).evaluate_plan(
-            plan_text, tool_calls
-        )
+        verdict = await get_jury_engine().evaluate_plan(plan_text, tool_calls)
         verdict_data = verdict.model_dump()
         update: dict[str, Any] = {"jury_verdict": verdict_data}
 
@@ -342,12 +339,6 @@ def create_agent_graph() -> CompiledStateGraph:
     )
 
 
-session_store = SessionStore(
-    backend=cast(
-        Literal["memory", "redis"],
-        os.getenv("SESSION_STORE_BACKEND", "memory"),
-    )
-)
 agent_graph = create_agent_graph()
 
 

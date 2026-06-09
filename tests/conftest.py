@@ -1,3 +1,5 @@
+"""Shared fixtures and import setup for the root test suite."""
+
 import sys
 from pathlib import Path
 from types import SimpleNamespace

@@ -2,6 +2,7 @@
 
 import json
 import re
+from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -228,3 +229,9 @@ class JuryEngine:
         if not isinstance(parsed, dict):
             raise ValueError("Jury model response must be a JSON object")
         return parsed
+
+
+@lru_cache(maxsize=1)
+def get_jury_engine() -> JuryEngine:
+    """Return the process-wide jury engine singleton."""
+    return JuryEngine(JuryConfig())

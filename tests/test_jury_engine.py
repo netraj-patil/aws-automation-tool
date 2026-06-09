@@ -1,3 +1,5 @@
+"""Tests for deterministic and LLM-assisted jury decisions."""
+
 from app.services.jury.jury_config import JuryConfig
 from app.services.jury.jury_engine import JuryEngine
 

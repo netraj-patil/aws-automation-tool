@@ -12,8 +12,8 @@ from app.models.agent_models import (
     ExecutionResponse,
     PlanResponse,
 )
-from app.services.graph import agent_graph, run_agent, session_store
-from app.services.session_store import SessionNotFoundError
+from app.services.graph import agent_graph, run_agent
+from app.services.session_store import SessionNotFoundError, session_store
 from app.utils.logging_decorator import get_logger
 
 

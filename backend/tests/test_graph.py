@@ -100,8 +100,8 @@ def test_planner_node_reports_invalid_json(monkeypatch) -> None:
 
 
 def test_jury_node_serializes_verdict(monkeypatch) -> None:
-    monkeypatch.setattr(graph, "JuryEngine", _FakeJuryEngine)
-    monkeypatch.setattr(graph, "JuryConfig", lambda: object())
+    fake_engine = _FakeJuryEngine(object())
+    monkeypatch.setattr(graph, "get_jury_engine", lambda: fake_engine)
     state = _state()
     state["plan"] = [
         {
@@ -161,8 +161,8 @@ def test_compiled_graph_runs_through_jury(monkeypatch) -> None:
         '"risk_level": "low", "reason": "Inspect available buckets"}]'
     )
     monkeypatch.setattr(graph, "_build_planner_llm", lambda: fake_llm)
-    monkeypatch.setattr(graph, "JuryEngine", _FakeJuryEngine)
-    monkeypatch.setattr(graph, "JuryConfig", lambda: object())
+    fake_engine = _FakeJuryEngine(object())
+    monkeypatch.setattr(graph, "get_jury_engine", lambda: fake_engine)
 
     result = asyncio.run(
         graph.create_agent_graph().ainvoke(
@@ -263,8 +263,8 @@ def test_run_agent_resumes_checkpoint_for_approval(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(graph, "_build_planner_llm", lambda: fake_llm)
-    monkeypatch.setattr(graph, "JuryEngine", _FakeJuryEngine)
-    monkeypatch.setattr(graph, "JuryConfig", lambda: object())
+    fake_engine = _FakeJuryEngine(object())
+    monkeypatch.setattr(graph, "get_jury_engine", lambda: fake_engine)
     monkeypatch.setattr(graph, "get_all_aws_tools", lambda: [fake_tool])
     monkeypatch.setattr(graph, "session_store", store)
     monkeypatch.setattr(graph, "agent_graph", graph.create_agent_graph())
