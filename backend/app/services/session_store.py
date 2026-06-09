@@ -76,6 +76,15 @@ class SessionStore:
         self._touch(session_id, session)
         return dict(session["aws_credentials"])
 
+    def update_credentials(
+        self, session_id: str, aws_credentials: dict[str, Any]
+    ) -> None:
+        """Replace credentials without clearing the session's message history."""
+        session = self._get(session_id)
+        session["aws_credentials"] = dict(aws_credentials)
+        session["last_active"] = self._timestamp()
+        self._save(session_id, session)
+
     def session_exists(self, session_id: str) -> bool:
         """Return whether the requested session exists."""
         if self.backend == "memory":
