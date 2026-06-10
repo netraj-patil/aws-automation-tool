@@ -67,6 +67,10 @@ uvicorn backend.app.main:app --reload
 
 The API is available at `http://127.0.0.1:8000`. FastAPI's interactive documentation is at `http://127.0.0.1:8000/docs`.
 
+## Frontend
+
+Open frontend/index.html in your browser while the backend is running.
+
 ## API Usage
 
 ### 1. Create a reviewed plan
@@ -122,7 +126,6 @@ The Jury does not replace AWS IAM controls. Use least-privilege credentials and 
 
 ## Known Limitations
 
-- There is no frontend yet; use the REST API or FastAPI documentation.
 - With the default in-memory session store, sessions reset whenever the process restarts.
 - Redis persists API session data, while LangGraph checkpoints currently remain process-local.
 - Supported operations are limited to the tools registered in `backend/app/services/aws_tools.py`.
