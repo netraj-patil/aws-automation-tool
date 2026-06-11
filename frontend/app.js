@@ -356,12 +356,7 @@
   }
 
   function renderChat() {
-    return renderPlaceholder(
-      "chat",
-      "Automation chat",
-      "Plan, review, and approve AWS operations from this workspace.",
-      "AI",
-    );
+    return global.Chat.render();
   }
 
   function renderResourceExplorer() {
@@ -432,6 +427,8 @@
       document.title = `${viewTitles[resolvedView]} | AWS Automation Tool`;
       if (resolvedView === "dashboard") {
         global.Dashboard.mount();
+      } else if (resolvedView === "chat") {
+        global.Chat.mount();
       }
     },
   };
@@ -671,7 +668,6 @@
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (action === "logout") {
         auth.removeToken();
-        localStorage.clear();
         navigate(DEFAULT_PUBLIC_VIEW, true);
         return;
       }
