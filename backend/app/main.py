@@ -11,7 +11,8 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routes.agent_routes import router
+from app.routes.agent_routes import router as agent_router
+from app.routes.auth_routes import router as auth_router
 from app.services.session_store import session_store
 from app.utils.logging_decorator import get_logger
 
@@ -54,7 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(router)
+app.include_router(auth_router)
+app.include_router(agent_router)
 
 
 @app.exception_handler(HTTPException)

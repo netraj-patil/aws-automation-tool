@@ -30,6 +30,9 @@ htmlcov/
 *.pid
 planning-response.json
 execution-response.json
+*.db
+*.db-shm
+*.db-wal
 
 # Editor and operating-system files
 .idea/
