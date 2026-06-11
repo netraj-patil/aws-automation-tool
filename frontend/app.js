@@ -93,6 +93,7 @@
         Accept: "application/json",
       };
       const token = auth.getToken();
+      const guestCredentials = auth.getGuestCredentials();
       const options = {
         method: method.toUpperCase(),
         headers,
@@ -100,6 +101,14 @@
 
       if (token) {
         headers.Authorization = `Bearer ${token}`;
+      }
+
+      if (guestCredentials) {
+        headers["X-AWS-Access-Key-Id"] = guestCredentials.aws_access_key_id;
+        headers["X-AWS-Secret-Access-Key"] = guestCredentials.aws_secret_access_key;
+        if (guestCredentials.aws_session_token) {
+          headers["X-AWS-Session-Token"] = guestCredentials.aws_session_token;
+        }
       }
 
       if (body !== undefined && body !== null) {
@@ -343,14 +352,7 @@
   }
 
   function renderDashboard() {
-    return renderPlaceholder(
-      "dashboard",
-      "Dashboard",
-      auth.isGuest()
-        ? "Demo mode is ready. Your temporary AWS credentials are available for automation requests."
-        : "Account activity and automation summaries will appear here.",
-      "DB",
-    );
+    return global.Dashboard.render();
   }
 
   function renderChat() {
@@ -428,6 +430,9 @@
         `
         : global.renderLayout(resolvedView, content);
       document.title = `${viewTitles[resolvedView]} | AWS Automation Tool`;
+      if (resolvedView === "dashboard") {
+        global.Dashboard.mount();
+      }
     },
   };
 
@@ -724,6 +729,7 @@
     document.addEventListener("change", (event) => {
       if (event.target.matches('[data-action="select-region"]')) {
         localStorage.setItem("active_aws_region", event.target.value);
+        global.Dashboard.reloadRegion();
       }
     });
 
