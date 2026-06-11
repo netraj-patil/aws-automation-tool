@@ -50,6 +50,17 @@
       }
     },
 
+    getActiveAwsProfile() {
+      try {
+        const profile = JSON.parse(
+          localStorage.getItem("active_aws_profile") || "null",
+        );
+        return profile && typeof profile === "object" ? profile : null;
+      } catch {
+        return null;
+      }
+    },
+
     isGuest() {
       return Boolean(this.getGuestCredentials());
     },
@@ -70,6 +81,10 @@
 
     if (typeof data?.detail?.detail === "string") {
       return data.detail.detail;
+    }
+
+    if (typeof data?.detail?.message === "string") {
+      return data.detail.message;
     }
 
     if (typeof data?.detail?.error === "string") {
@@ -94,6 +109,7 @@
       };
       const token = auth.getToken();
       const guestCredentials = auth.getGuestCredentials();
+      const awsCredentials = guestCredentials || auth.getActiveAwsProfile();
       const options = {
         method: method.toUpperCase(),
         headers,
@@ -103,11 +119,21 @@
         headers.Authorization = `Bearer ${token}`;
       }
 
-      if (guestCredentials) {
-        headers["X-AWS-Access-Key-Id"] = guestCredentials.aws_access_key_id;
-        headers["X-AWS-Secret-Access-Key"] = guestCredentials.aws_secret_access_key;
-        if (guestCredentials.aws_session_token) {
-          headers["X-AWS-Session-Token"] = guestCredentials.aws_session_token;
+      if (awsCredentials) {
+        const accessKey = awsCredentials.aws_access_key_id
+          || awsCredentials.accessKeyId
+          || awsCredentials.access_key_id;
+        const secretKey = awsCredentials.aws_secret_access_key
+          || awsCredentials.secretAccessKey
+          || awsCredentials.secret_access_key;
+        const sessionToken = awsCredentials.aws_session_token
+          || awsCredentials.sessionToken;
+        if (accessKey && secretKey) {
+          headers["X-AWS-Access-Key-Id"] = accessKey;
+          headers["X-AWS-Secret-Access-Key"] = secretKey;
+        }
+        if (sessionToken) {
+          headers["X-AWS-Session-Token"] = sessionToken;
         }
       }
 
@@ -363,6 +389,10 @@
     return global.ResourceExplorer.render();
   }
 
+  function renderProfile() {
+    return global.Profile.render();
+  }
+
   const viewTitles = {
     login: "Sign in",
     register: "Create account",
@@ -370,6 +400,7 @@
     dashboard: "Dashboard",
     chat: "Automation chat",
     "resource-explorer": "Resource explorer",
+    profile: "Profile",
   };
 
   const router = {
@@ -380,6 +411,7 @@
       dashboard: renderDashboard,
       chat: renderChat,
       "resource-explorer": renderResourceExplorer,
+      profile: renderProfile,
     },
 
     currentView: null,
@@ -426,6 +458,8 @@
         global.Chat.mount();
       } else if (resolvedView === "resource-explorer") {
         global.ResourceExplorer.mount();
+      } else if (resolvedView === "profile") {
+        global.Profile.mount();
       }
     },
   };
@@ -677,7 +711,7 @@
       }
 
       if (action === "switch-profile") {
-        global.Components.toast("Profile switching will be available soon.", "primary");
+        navigate("profile");
         return;
       }
 

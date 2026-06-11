@@ -2,6 +2,7 @@
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 import uvicorn
@@ -11,6 +12,10 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+
+PROJECT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(PROJECT_ENV_FILE, override=True)
+
 from app.routes.agent_routes import router as agent_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.dashboard_routes import router as dashboard_router
@@ -19,14 +24,13 @@ from app.services.session_store import session_store
 from app.utils.logging_decorator import get_logger
 
 
-load_dotenv()
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialize application services and log lifecycle events."""
-    load_dotenv()
+    load_dotenv(PROJECT_ENV_FILE, override=True)
     logger.info(
         "AWS Automation Agent starting",
         extra={"session_store_backend": session_store.backend},

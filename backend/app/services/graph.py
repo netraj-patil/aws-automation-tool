@@ -8,6 +8,7 @@
 import json
 import os
 import re
+from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from dotenv import load_dotenv
@@ -30,7 +31,9 @@ from app.services.session_store import session_store
 from app.utils.logging_decorator import get_logger
 
 
-load_dotenv()
+PROJECT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(PROJECT_ENV_FILE, override=True)
+os.environ.pop("GOOGLE_API_KEY", None)
 logger = get_logger(__name__)
 
 
@@ -437,18 +440,13 @@ async def run_agent(
 
 def _build_planner_llm() -> Any:
     gemini_api_key = os.getenv("GEMINI_API_KEY")
-    google_api_key = os.environ.pop("GOOGLE_API_KEY", None)
-    try:
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            api_key=gemini_api_key,
-            temperature=0.1,
-            timeout=30,
-            max_retries=1,
-        )
-    finally:
-        if google_api_key is not None:
-            os.environ["GOOGLE_API_KEY"] = google_api_key
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        api_key=gemini_api_key,
+        temperature=0.1,
+        timeout=30,
+        max_retries=1,
+    )
 
 
 def _build_tool_catalog(tools: list[Any]) -> str:

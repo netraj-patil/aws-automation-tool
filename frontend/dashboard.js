@@ -102,17 +102,24 @@
     return document.getElementById(`dashboard-${section}`);
   }
 
-  function renderError(section, message) {
+  function isPermissionError(error) {
+    return error?.status === 403
+      || error?.data?.detail?.code === "aws_permission_required";
+  }
+
+  function renderError(section, error) {
     const element = sectionElement(section);
     if (!element || !isMounted()) {
       return;
     }
+    const permissionError = isPermissionError(error);
+    const message = error?.message || "The request to AWS failed.";
     element.innerHTML = `
-      <div class="dashboard-error" role="alert">
-        <span class="dashboard-error__icon" aria-hidden="true">!</span>
+      <div class="dashboard-error${permissionError ? " dashboard-error--permission" : ""}" role="${permissionError ? "status" : "alert"}">
+        <span class="dashboard-error__icon" aria-hidden="true">${permissionError ? "i" : "!"}</span>
         <div>
-          <strong>Unable to load ${section === "ec2" ? "EC2 instances" : section}</strong>
-          <p>${escapeHtml(message || "The request to AWS failed.")}</p>
+          <strong>${permissionError ? "AWS permission needed" : `Unable to load ${section === "ec2" ? "EC2 instances" : section}`}</strong>
+          <p>${escapeHtml(message)}</p>
         </div>
         <button class="button button--secondary" type="button" data-dashboard-retry="${section}">Retry</button>
       </div>
@@ -137,19 +144,32 @@
     if (!element || !isMounted()) {
       return;
     }
+    const metric = (value) => value === null || value === undefined
+      ? '<span class="summary-card__unavailable">--</span>'
+      : Number(value);
+    const warnings = Array.isArray(data.permission_warnings)
+      ? data.permission_warnings
+      : [];
     element.innerHTML = `
       <div class="summary-grid">
         ${summaryCard(
           "ec2",
-          `<span class="summary-card__running">${Number(data.ec2?.running || 0)}</span><span class="summary-card__total"> / ${Number(data.ec2?.total || 0)}</span>`,
+          data.ec2?.running === null || data.ec2?.total === null
+            ? metric(null)
+            : `<span class="summary-card__running">${Number(data.ec2?.running || 0)}</span><span class="summary-card__total"> / ${Number(data.ec2?.total || 0)}</span>`,
           "EC2 Instances",
           "running / total",
         )}
-        ${summaryCard("s3", Number(data.s3?.total || 0), "S3 Buckets")}
-        ${summaryCard("rds", Number(data.rds?.total || 0), "RDS Instances")}
-        ${summaryCard("iam", Number(data.iam?.total || 0), "IAM Users")}
-        ${summaryCard("vpc", Number(data.vpc?.active || 0), "Active VPCs")}
+        ${summaryCard("s3", metric(data.s3?.total), "S3 Buckets")}
+        ${summaryCard("rds", metric(data.rds?.total), "RDS Instances")}
+        ${summaryCard("iam", metric(data.iam?.total), "IAM Users")}
+        ${summaryCard("vpc", metric(data.vpc?.custom), "Custom VPCs")}
       </div>
+      ${warnings.length ? `
+        <p class="dashboard-permission-note">
+          Some counts need additional read permission: ${escapeHtml(warnings.join(", "))}.
+        </p>
+      ` : ""}
     `;
   }
 
@@ -365,7 +385,7 @@
       );
       renderSummary(data);
     } catch (error) {
-      renderError("summary", error.message);
+      renderError("summary", error);
     }
   }
 
@@ -375,7 +395,7 @@
     try {
       renderCosts(await global.api.request("GET", "/dashboard/costs"));
     } catch (error) {
-      renderError("costs", error.message);
+      renderError("costs", error);
     }
   }
 
@@ -389,7 +409,7 @@
       );
       renderInstances(data);
     } catch (error) {
-      renderError("ec2", error.message);
+      renderError("ec2", error);
     }
   }
 

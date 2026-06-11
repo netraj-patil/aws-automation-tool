@@ -6,6 +6,15 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
+
+
+PERMISSION_ERROR_CODES = {
+    "AccessDenied",
+    "AccessDeniedException",
+    "AuthorizationError",
+    "UnauthorizedOperation",
+}
 
 
 class DashboardService:
@@ -35,6 +44,25 @@ class DashboardService:
             for page in paginator.paginate()
         )
 
+    @staticmethod
+    def _is_permission_error(exc: ClientError) -> bool:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        return code in PERMISSION_ERROR_CODES or "AccessDenied" in code
+
+    def _optional_metric(
+        self,
+        label: str,
+        loader: Any,
+        permission_warnings: list[str],
+    ) -> Any:
+        try:
+            return loader()
+        except ClientError as exc:
+            if not self._is_permission_error(exc):
+                raise
+            permission_warnings.append(label)
+            return None
+
     def get_summary(
         self,
         region: str,
@@ -43,20 +71,45 @@ class DashboardService:
         """Return resource counts for the selected AWS region."""
         session = self._session(credentials)
         ec2 = self._client(session, "ec2", region)
-        reservations = ec2.get_paginator("describe_instances").paginate()
-        instances = [
-            instance
-            for page in reservations
-            for reservation in page.get("Reservations", [])
-            for instance in reservation.get("Instances", [])
-            if instance.get("State", {}).get("Name") != "terminated"
-        ]
-
         s3 = self._client(session, "s3", region)
         rds = self._client(session, "rds", region)
         iam = self._client(session, "iam", region)
-        vpcs = self._client(session, "ec2", region).describe_vpcs().get(
-            "Vpcs", []
+        permission_warnings: list[str] = []
+
+        def load_instances() -> list[dict[str, Any]]:
+            reservations = ec2.get_paginator("describe_instances").paginate()
+            return [
+                instance
+                for page in reservations
+                for reservation in page.get("Reservations", [])
+                for instance in reservation.get("Instances", [])
+                if instance.get("State", {}).get("Name") != "terminated"
+            ]
+
+        instances = self._optional_metric(
+            "EC2 instances", load_instances, permission_warnings
+        )
+        bucket_count = self._optional_metric(
+            "S3 buckets",
+            lambda: len(s3.list_buckets().get("Buckets", [])),
+            permission_warnings,
+        )
+        rds_count = self._optional_metric(
+            "RDS instances",
+            lambda: self._count_pages(
+                rds, "describe_db_instances", "DBInstances"
+            ),
+            permission_warnings,
+        )
+        iam_count = self._optional_metric(
+            "IAM users",
+            lambda: self._count_pages(iam, "list_users", "Users"),
+            permission_warnings,
+        )
+        vpcs = self._optional_metric(
+            "VPCs",
+            lambda: ec2.describe_vpcs().get("Vpcs", []),
+            permission_warnings,
         )
 
         return {
@@ -64,22 +117,21 @@ class DashboardService:
             "ec2": {
                 "running": sum(
                     instance.get("State", {}).get("Name") == "running"
-                    for instance in instances
-                ),
-                "total": len(instances),
+                    for instance in (instances or [])
+                ) if instances is not None else None,
+                "total": len(instances) if instances is not None else None,
             },
-            "s3": {"total": len(s3.list_buckets().get("Buckets", []))},
-            "rds": {
-                "total": self._count_pages(
-                    rds, "describe_db_instances", "DBInstances"
-                )
-            },
-            "iam": {
-                "total": self._count_pages(iam, "list_users", "Users")
-            },
+            "s3": {"total": bucket_count},
+            "rds": {"total": rds_count},
+            "iam": {"total": iam_count},
             "vpc": {
-                "active": sum(vpc.get("State") == "available" for vpc in vpcs)
+                "custom": sum(
+                    vpc.get("State") == "available"
+                    and not vpc.get("IsDefault", False)
+                    for vpc in (vpcs or [])
+                ) if vpcs is not None else None
             },
+            "permission_warnings": permission_warnings,
         }
 
     def get_costs(
