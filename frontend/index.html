@@ -8,63 +8,11 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231c1e22'/%3E%3Cpath d='M9 10.5 16 6l7 4.5v8L16 23l-7-4.5v-8Z' fill='none' stroke='%234f8ef7' stroke-width='2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
   <script src="./components.js" defer></script>
+  <script src="./layout.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
-  <div class="app-shell" id="app-shell">
-    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
-      <a class="brand" href="#dashboard" data-route="dashboard" aria-label="AWS Automation home">
-        <span class="brand__mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" role="img">
-            <path d="M7 7.5 12 4l5 3.5v6L12 17l-5-3.5v-6Z"></path>
-            <path d="m7 13.5-3 2L12 21l8-5.5-3-2"></path>
-          </svg>
-        </span>
-        <span class="brand__name">AWS Automate</span>
-      </a>
-
-      <nav class="nav">
-        <a class="nav__item" href="#dashboard" data-route="dashboard">
-          <span class="nav__icon" aria-hidden="true">⌂</span>
-          <span>Dashboard</span>
-        </a>
-        <a class="nav__item" href="#chat" data-route="chat">
-          <span class="nav__icon" aria-hidden="true">◇</span>
-          <span>Automation Chat</span>
-        </a>
-        <a class="nav__item" href="#resource-explorer" data-route="resource-explorer">
-          <span class="nav__icon" aria-hidden="true">▦</span>
-          <span>Resources</span>
-        </a>
-      </nav>
-
-      <div class="sidebar__footer">
-        <button class="nav__item nav__item--button" id="logout-button" type="button">
-          <span class="nav__icon" aria-hidden="true">↪</span>
-          <span>Sign out</span>
-        </button>
-      </div>
-    </aside>
-
-    <main class="main" id="main-content">
-      <header class="topbar" id="topbar">
-        <div>
-          <p class="eyebrow">AWS workspace</p>
-          <h1 class="page-title" id="page-title">AWS Automation</h1>
-        </div>
-        <div class="topbar__actions">
-          <span class="status-indicator">
-            <span class="status-indicator__dot" aria-hidden="true"></span>
-            API ready
-          </span>
-          <span class="avatar" aria-label="Current user">AU</span>
-        </div>
-      </header>
-
-      <section class="view-container" id="app" aria-live="polite"></section>
-    </main>
-  </div>
-
+  <div id="app" aria-live="polite"></div>
   <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
 </body>
 </html>

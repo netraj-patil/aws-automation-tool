@@ -414,57 +414,22 @@
       }
 
       const app = document.getElementById("app");
-      const shell = document.getElementById("app-shell");
       const isPublic = PUBLIC_VIEWS.has(resolvedView);
+      const content = this.routes[resolvedView]();
 
       this.currentView = resolvedView;
-      app.innerHTML = this.routes[resolvedView]();
-      shell.classList.toggle("app-shell--auth", isPublic);
-      updateNavigation(resolvedView);
-      updatePageTitle(resolvedView);
-      updateCurrentUser();
+      app.innerHTML = isPublic
+        ? `
+          <div class="app-shell app-shell--auth">
+            <main class="main">
+              <section class="view-container">${content}</section>
+            </main>
+          </div>
+        `
+        : global.renderLayout(resolvedView, content);
       document.title = `${viewTitles[resolvedView]} | AWS Automation Tool`;
     },
   };
-
-  function updateNavigation(activeView) {
-    document.querySelectorAll("[data-route]").forEach((link) => {
-      const isActive = link.dataset.route === activeView;
-      link.classList.toggle("active", isActive);
-      if (isActive) {
-        link.setAttribute("aria-current", "page");
-      } else {
-        link.removeAttribute("aria-current");
-      }
-    });
-  }
-
-  function updatePageTitle(view) {
-    const title = document.getElementById("page-title");
-    if (title) {
-      title.textContent = viewTitles[view] || "AWS Automation";
-    }
-  }
-
-  function updateCurrentUser() {
-    const avatar = document.querySelector(".avatar");
-    if (!avatar) {
-      return;
-    }
-
-    const user = auth.getUser();
-    if (auth.isGuest()) {
-      avatar.textContent = "GU";
-      avatar.setAttribute("aria-label", "Guest user");
-      return;
-    }
-
-    const initials = user?.name
-      ? user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("")
-      : "AU";
-    avatar.textContent = initials.toUpperCase();
-    avatar.setAttribute("aria-label", user?.name || "Current user");
-  }
 
   function navigate(view, replace = false) {
     const targetView = router.resolve(view)
@@ -698,6 +663,26 @@
         return;
       }
 
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (action === "logout") {
+        auth.removeToken();
+        localStorage.clear();
+        navigate(DEFAULT_PUBLIC_VIEW, true);
+        return;
+      }
+
+      if (action === "toggle-sidebar") {
+        const layout = document.querySelector(".app-layout");
+        const isCollapsed = layout?.classList.toggle("app-layout--collapsed");
+        localStorage.setItem("sidebar_collapsed", String(Boolean(isCollapsed)));
+        return;
+      }
+
+      if (action === "switch-profile") {
+        global.Components.toast("Profile switching will be available soon.", "primary");
+        return;
+      }
+
       const passwordToggle = event.target.closest("[data-password-toggle]");
       if (passwordToggle) {
         const input = document.getElementById(passwordToggle.dataset.passwordToggle);
@@ -736,9 +721,10 @@
       }
     });
 
-    document.getElementById("logout-button")?.addEventListener("click", () => {
-      auth.removeToken();
-      navigate(DEFAULT_PUBLIC_VIEW, true);
+    document.addEventListener("change", (event) => {
+      if (event.target.matches('[data-action="select-region"]')) {
+        localStorage.setItem("active_aws_region", event.target.value);
+      }
     });
 
     window.addEventListener("hashchange", handleRouteChange);
