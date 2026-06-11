@@ -215,7 +215,9 @@
             <label class="global-search">
               <span class="global-search__icon">${icons.search}</span>
               <span class="sr-only">Search resources</span>
-              <input type="search" placeholder="Search resources..." aria-label="Search resources">
+              <input type="search" placeholder="Search resources..." aria-label="Search resources"
+                data-action="global-resource-search"
+                value="${escapeHtml(sessionStorage.getItem("resource_explorer_query") || "")}">
             </label>
             <div class="app-header__actions">
               <button class="icon-button notification-button" type="button" aria-label="Notifications">

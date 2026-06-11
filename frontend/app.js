@@ -360,12 +360,7 @@
   }
 
   function renderResourceExplorer() {
-    return renderPlaceholder(
-      "resource-explorer",
-      "Resource explorer",
-      "Browse AWS resources and inspect their configuration here.",
-      "AWS",
-    );
+    return global.ResourceExplorer.render();
   }
 
   const viewTitles = {
@@ -429,6 +424,8 @@
         global.Dashboard.mount();
       } else if (resolvedView === "chat") {
         global.Chat.mount();
+      } else if (resolvedView === "resource-explorer") {
+        global.ResourceExplorer.mount();
       }
     },
   };
@@ -727,6 +724,18 @@
         localStorage.setItem("active_aws_region", event.target.value);
         global.Dashboard.reloadRegion();
       }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (!event.target.matches('[data-action="global-resource-search"]') || event.key !== "Enter") {
+        return;
+      }
+      const query = event.target.value.trim();
+      if (!query) {
+        return;
+      }
+      sessionStorage.setItem("resource_explorer_query", query);
+      navigate("resource-explorer");
     });
 
     window.addEventListener("hashchange", handleRouteChange);

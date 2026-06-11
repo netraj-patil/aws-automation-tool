@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from app.routes.agent_routes import router as agent_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.dashboard_routes import router as dashboard_router
+from app.routes.resource_routes import router as resource_router
 from app.services.session_store import session_store
 from app.utils.logging_decorator import get_logger
 
@@ -59,6 +60,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(agent_router)
 app.include_router(dashboard_router)
+app.include_router(resource_router)
 
 
 @app.exception_handler(HTTPException)
