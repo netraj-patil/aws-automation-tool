@@ -43,6 +43,15 @@ def test_generate_blueprint(client: TestClient) -> None:
         "https-load-balancer",
         "monitoring",
     } <= resource_ids
+    assert payload["diagram_mermaid"].startswith("graph TD")
+    assert (
+        'node_app_compute["FastAPI application compute"]'
+        in payload["diagram_mermaid"]
+    )
+    assert (
+        "node_app_compute --> node_postgres_database"
+        in payload["diagram_mermaid"]
+    )
     assert payload["estimated_cost"]["estimated_monthly_total"] > 0
     assert payload["security_review"]["passed"] is True
 

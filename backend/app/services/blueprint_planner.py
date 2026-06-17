@@ -20,6 +20,7 @@ from app.models.blueprint_models import (
     SecurityWarning,
     StrictBlueprintModel,
 )
+from app.services.diagram_service import generate_blueprint_mermaid
 from app.utils.logging_decorator import get_logger
 
 
@@ -258,7 +259,10 @@ class BlueprintPlanner:
             summary=draft.summary,
             resources=resources,
             connections=draft.connections,
-            diagram_mermaid=_build_mermaid(draft.connections),
+            diagram_mermaid=generate_blueprint_mermaid(
+                resources,
+                draft.connections,
+            ),
             estimated_cost=CostEstimate(
                 estimated_monthly_total=total,
                 breakdown=breakdown,
@@ -386,15 +390,6 @@ def _highest_risk(levels: list[RiskLevel]) -> RiskLevel:
     if not levels:
         return "low"
     return max(levels, key=lambda level: order[level])
-
-
-def _build_mermaid(connections: list[BlueprintConnection]) -> str | None:
-    if not connections:
-        return None
-    lines = ["graph TD"]
-    for connection in connections:
-        lines.append(f"  {connection.from_resource} --> {connection.to_resource}")
-    return "\n".join(lines)
 
 
 def _response_text(response: Any) -> str:
