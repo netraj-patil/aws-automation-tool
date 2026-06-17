@@ -393,6 +393,10 @@
     return global.Profile.render();
   }
 
+  function renderPlanner() {
+    return global.Planner.render();
+  }
+
   const viewTitles = {
     login: "Sign in",
     register: "Create account",
@@ -400,6 +404,7 @@
     dashboard: "Dashboard",
     chat: "Automation chat",
     "resource-explorer": "Resource explorer",
+    "visual-planner": "Visual Planner",
     profile: "Profile",
   };
 
@@ -411,6 +416,7 @@
       dashboard: renderDashboard,
       chat: renderChat,
       "resource-explorer": renderResourceExplorer,
+      "visual-planner": renderPlanner,
       profile: renderProfile,
     },
 
@@ -458,6 +464,8 @@
         global.Chat.mount();
       } else if (resolvedView === "resource-explorer") {
         global.ResourceExplorer.mount();
+      } else if (resolvedView === "visual-planner") {
+        global.Planner.mount();
       } else if (resolvedView === "profile") {
         global.Profile.mount();
       }
