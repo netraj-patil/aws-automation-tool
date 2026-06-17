@@ -1,0 +1,984 @@
+(function initializePlanner(global) {
+  "use strict";
+
+  const STORAGE_KEY = "cloudforge_visual_planner_blueprint";
+  const DEFAULT_PROMPT = "Deploy a production-ready FastAPI app with PostgreSQL, S3 storage, and HTTPS.";
+
+  const state = {
+    prompt: "",
+    activeBlueprint: null,
+    deployment: null,
+    deploymentHistory: [],
+    deploymentHistoryLoading: false,
+    loading: false,
+    actionLoading: "",
+    error: "",
+    executionError: "",
+    showHighRiskOverride: false,
+    diagramScale: 1,
+    selectedDiagramNode: "",
+  };
+
+  const icons = {
+    diagram: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h5v5H5zM14 4h5v5h-5zM14 15h5v5h-5z"></path><path d="M10 10.5h2c1.1 0 2-.9 2-2v-2M10 10.5h2c1.1 0 2 .9 2 2v5"></path></svg>',
+    resources: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"></path><path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5"></path></svg>',
+    cost: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path></svg>',
+    shield: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 7v5c0 5-3.4 8.2-8 9-4.6-.8-8-4-8-9V7l8-4Z"></path><path d="m9 12 2 2 4-5"></path></svg>',
+  };
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function isMounted() {
+    return global.router?.currentView === "visual-planner";
+  }
+
+  function currencyFormatter(currency) {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: currency || "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    } catch {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+  }
+
+  function titleCase(value) {
+    return String(value || "")
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function statusTone(status) {
+    if (["approved", "deployed"].includes(status)) return "success";
+    if (["deploying", "saved"].includes(status)) return "warning";
+    if (["failed", "cancelled"].includes(status)) return "danger";
+    return "primary";
+  }
+
+  function riskTone(level) {
+    if (["critical", "high"].includes(level)) return "danger";
+    if (level === "medium") return "warning";
+    if (level === "low") return "success";
+    return "primary";
+  }
+
+  function visibilityTone(visibility) {
+    if (visibility === "public") return "warning";
+    if (visibility === "private") return "success";
+    return "primary";
+  }
+
+  function badge(text, tone = "primary", className = "") {
+    return `<span class="planner-badge planner-badge--${tone}${className ? ` ${className}` : ""}">${escapeHtml(text)}</span>`;
+  }
+
+  function persistBlueprint(blueprint) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(blueprint));
+    } catch {
+      /* Local persistence is optional; the planner still works without it. */
+    }
+  }
+
+  function loadStoredBlueprint() {
+    try {
+      const blueprint = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (blueprint && typeof blueprint === "object" && blueprint.blueprint_id) {
+        state.activeBlueprint = blueprint;
+        state.prompt = blueprint.user_prompt || state.prompt;
+        state.deployment = null;
+        state.deploymentHistory = [];
+        state.executionError = "";
+        state.showHighRiskOverride = false;
+      }
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }
+
+  function render() {
+    const prompt = state.prompt || DEFAULT_PROMPT;
+    return `
+      <div class="view planner-view" data-view="visual-planner">
+        <section class="planner-composer" aria-labelledby="planner-composer-title">
+          <div class="planner-composer__copy">
+            <span class="planner-kicker">CloudForge Visual Planner</span>
+            <h2 id="planner-composer-title">What do you want to deploy?</h2>
+          </div>
+          <form class="planner-form" id="planner-generate-form">
+            <label class="sr-only" for="planner-prompt">Deployment prompt</label>
+            <textarea
+              class="planner-textarea"
+              id="planner-prompt"
+              name="prompt"
+              rows="4"
+              placeholder="Describe the application, data stores, networking, and production requirements."
+            >${escapeHtml(prompt)}</textarea>
+            <div class="planner-form__footer">
+              <p class="planner-form__hint">Blueprint generation creates a reviewed plan only. It does not deploy AWS resources.</p>
+              <button class="planner-button planner-button--primary" type="submit" data-planner-generate>
+                <span class="planner-button__label">Generate Plan</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section class="planner-result-shell" id="planner-result" aria-live="polite"></section>
+      </div>
+    `;
+  }
+
+  function mount() {
+    if (!state.activeBlueprint) {
+      loadStoredBlueprint();
+    }
+    renderPlannerBody();
+    loadDeploymentHistory();
+  }
+
+  function setGenerateLoading(isLoading) {
+    const button = document.querySelector("[data-planner-generate]");
+    if (!button) return;
+    const label = button.querySelector(".planner-button__label");
+    button.disabled = isLoading;
+    button.setAttribute("aria-busy", String(isLoading));
+    if (isLoading) {
+      label.dataset.originalText = label.textContent;
+      label.textContent = "Generating";
+      button.insertAdjacentHTML("afterbegin", global.Components.spinner());
+    } else {
+      button.querySelector(".spinner")?.remove();
+      label.textContent = label.dataset.originalText || "Generate Plan";
+      button.removeAttribute("aria-busy");
+    }
+  }
+
+  function renderPlannerBody() {
+    if (!isMounted()) return;
+    const result = document.getElementById("planner-result");
+    if (!result) return;
+
+    setGenerateLoading(state.loading);
+
+    if (state.loading) {
+      result.innerHTML = loadingState();
+      return;
+    }
+
+    if (state.error) {
+      result.innerHTML = errorState(state.error);
+      return;
+    }
+
+    if (!state.activeBlueprint) {
+      result.innerHTML = emptyState();
+      return;
+    }
+
+    result.innerHTML = blueprintState(state.activeBlueprint);
+    renderArchitectureDiagram(state.activeBlueprint);
+  }
+
+  function emptyState() {
+    return `
+      <div class="planner-empty">
+        <div>
+          <h3>No blueprint generated yet</h3>
+          <p>Enter a deployment prompt above to generate a diagram, resource list, cost estimate, and security review.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  function loadingState() {
+    return `
+      <div class="planner-loading" role="status">
+        ${global.Components.spinner()}
+        <div>
+          <strong>Generating deployment blueprint</strong>
+          <p>Planning resources, diagram text, cost, and security review.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  function errorState(message) {
+    return `
+      <div class="planner-error" role="alert">
+        <div>
+          <strong>Unable to generate plan</strong>
+          <p>${escapeHtml(message)}</p>
+        </div>
+        <button class="planner-button planner-button--secondary" type="button" data-planner-retry>Try again</button>
+      </div>
+    `;
+  }
+
+  function blueprintState(blueprint) {
+    const status = blueprint.status || "draft";
+    return `
+      <div class="planner-blueprint">
+        <header class="planner-blueprint__header">
+          <div>
+            <div class="planner-title-row">
+              <h2>${escapeHtml(blueprint.name || "Deployment Blueprint")}</h2>
+              ${badge(titleCase(status), statusTone(status))}
+            </div>
+            <p>${escapeHtml(blueprint.summary || "Review the generated architecture before approving it.")}</p>
+          </div>
+          <div class="planner-actions" aria-label="Blueprint actions">
+            <button class="planner-button planner-button--secondary" type="button" data-planner-action="save" ${buttonDisabled("save", blueprint)}>
+              ${actionButtonContent("save", "Save Plan")}
+            </button>
+            <button class="planner-button planner-button--primary" type="button" data-planner-action="approve" ${buttonDisabled("approve", blueprint)}>
+              ${actionButtonContent("approve", "Approve")}
+            </button>
+            <button class="planner-button planner-button--outline" type="button" data-planner-action="execute" ${buttonDisabled("execute", blueprint)}>
+              ${actionButtonContent("execute", "Execute")}
+            </button>
+          </div>
+        </header>
+
+        <section class="planner-prompt-summary">
+          <span>Prompt</span>
+          <p>${escapeHtml(blueprint.user_prompt)}</p>
+        </section>
+
+        ${deploymentStatusPanel(blueprint)}
+
+        <div class="planner-grid">
+          ${diagramPanel(blueprint)}
+          ${costPanel(blueprint)}
+          ${resourcesPanel(blueprint)}
+          ${securityPanel(blueprint)}
+        </div>
+      </div>
+    `;
+  }
+
+  function buttonDisabled(action, blueprint) {
+    const status = blueprint.status || "draft";
+    const loading = state.actionLoading === action;
+    if (loading) return "disabled aria-busy=\"true\"";
+    if (action === "save" && status !== "draft") return "disabled";
+    if (action === "approve" && !["draft", "saved"].includes(status)) return "disabled";
+    if (action === "execute" && status !== "approved") return "disabled";
+    if (state.actionLoading) return "disabled";
+    return "";
+  }
+
+  function actionButtonContent(action, label) {
+    if (state.actionLoading !== action) {
+      return escapeHtml(label);
+    }
+    const loadingLabels = {
+      save: "Saving",
+      approve: "Approving",
+      execute: "Executing",
+      "execute-override": "Executing",
+    };
+    return `${global.Components.spinner()}<span>${escapeHtml(loadingLabels[action] || "Working")}</span>`;
+  }
+
+  function deploymentStatusPanel(blueprint) {
+    const deployment = state.deployment || state.deploymentHistory[0] || null;
+    const executing = ["execute", "execute-override"].includes(state.actionLoading);
+    const hasError = Boolean(state.executionError);
+    if (!deployment && !executing && !hasError && !state.deploymentHistoryLoading) return "";
+
+    const status = deployment?.status || (executing ? "deploying" : "failed");
+    const logs = Array.isArray(deployment?.logs) ? deployment.logs : [];
+    const plannedResources = Array.isArray(deployment?.planned_resources)
+      ? deployment.planned_resources
+      : [];
+    const awsResources = Array.isArray(deployment?.aws_resources)
+      ? deployment.aws_resources
+      : [];
+    const resources = plannedResources.length ? plannedResources : awsResources;
+    const errorMessage = deployment?.error || state.executionError;
+    const showOverride = state.showHighRiskOverride
+      && (blueprint.status || "draft") === "approved";
+
+    return `
+      <section class="planner-execution-panel" aria-live="polite">
+        <header class="planner-execution-panel__header">
+          <div>
+            <span class="planner-execution-panel__eyebrow">Latest deployment</span>
+            <h3>Status History</h3>
+          </div>
+          ${badge(titleCase(status), statusTone(status))}
+        </header>
+
+        ${state.deploymentHistoryLoading ? `
+          <div class="planner-execution-loading">
+            ${global.Components.spinner()}
+            <span>Loading deployment history</span>
+          </div>
+        ` : ""}
+
+        ${errorMessage ? `
+          <div class="planner-execution-alert" role="alert">
+            <strong>${status === "failed" ? "Deployment failed" : "Execution blocked"}</strong>
+            <p>${escapeHtml(errorMessage)}</p>
+            ${showOverride ? `
+              <button class="planner-button planner-button--destructive" type="button" data-planner-action="execute-override" ${state.actionLoading ? "disabled" : ""}>
+                ${actionButtonContent("execute-override", "Override high risk and execute")}
+              </button>
+            ` : ""}
+          </div>
+        ` : ""}
+
+        <div class="planner-execution-meta">
+          ${deployment?.deployment_id ? `<code>${escapeHtml(deployment.deployment_id)}</code>` : "<span>Preparing execution gate</span>"}
+          ${resources.length ? `<span>${resources.length} resources</span>` : ""}
+          ${deployment?.updated_at ? `<span>Updated ${escapeHtml(formatDateTime(deployment.updated_at))}</span>` : ""}
+        </div>
+
+        <div class="planner-deployment-layout">
+          <div>
+            <h4>Logs</h4>
+            <ol class="planner-execution-log">
+              ${logs.length ? logs.map((log) => `<li>${escapeHtml(log)}</li>`).join("") : `
+                <li>${executing ? "Starting blueprint execution" : "No deployment logs yet"}</li>
+              `}
+            </ol>
+          </div>
+
+          <div>
+            <h4>Resources</h4>
+            ${resources.length ? `
+              <ul class="planner-deployment-resources">
+                ${resources.map((resource) => `
+                  <li>
+                    <strong>${escapeHtml(resource.name || resource.resource_id || resource.id || "AWS resource")}</strong>
+                    <span>${escapeHtml([resource.service, resource.type, resource.action].filter(Boolean).join(" / ") || "planned")}</span>
+                  </li>
+                `).join("")}
+              </ul>
+            ` : '<p class="planner-muted planner-deployment-empty">No resources recorded yet.</p>'}
+          </div>
+        </div>
+
+        ${deploymentHistoryList()}
+      </section>
+    `;
+  }
+
+  function deploymentHistoryList() {
+    const history = Array.isArray(state.deploymentHistory) ? state.deploymentHistory : [];
+    if (!history.length) return "";
+
+    return `
+      <div class="planner-deployment-history">
+        <header>
+          <h4>Deployment History</h4>
+          <span>${history.length} ${history.length === 1 ? "record" : "records"}</span>
+        </header>
+        <ul>
+          ${history.map((deployment) => `
+            <li>
+              <div>
+                ${badge(titleCase(deployment.status), statusTone(deployment.status), "planner-badge--compact")}
+                <code>${escapeHtml(deployment.deployment_id)}</code>
+              </div>
+              <span>${escapeHtml(formatDateTime(deployment.updated_at || deployment.created_at))}</span>
+            </li>
+          `).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function panelHeader(icon, title, meta = "") {
+    return `
+      <header class="planner-panel__header">
+        <span class="planner-panel__icon">${icon}</span>
+        <h3>${escapeHtml(title)}</h3>
+        ${meta ? `<span class="planner-panel__meta">${meta}</span>` : ""}
+      </header>
+    `;
+  }
+
+  function diagramPanel(blueprint) {
+    const diagram = blueprint.diagram_mermaid || "";
+    return `
+      <section class="planner-panel planner-panel--diagram">
+        ${panelHeader(icons.diagram, "Architecture Diagram", badge("Interactive Mermaid", "primary"))}
+        <div class="planner-diagram-toolbar" aria-label="Diagram controls">
+          <button class="planner-diagram-tool" type="button" data-diagram-zoom="out" aria-label="Zoom out">-</button>
+          <button class="planner-diagram-tool" type="button" data-diagram-zoom="reset" aria-label="Reset zoom">100%</button>
+          <button class="planner-diagram-tool" type="button" data-diagram-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="planner-diagram" data-planner-diagram data-diagram-source="${escapeHtml(diagram)}" aria-label="Architecture diagram">
+          <div class="planner-diagram__loading">${global.Components.spinner()}<span>Rendering diagram</span></div>
+        </div>
+        <div class="planner-diagram-detail" data-diagram-detail>
+          <span>Resource details</span>
+          <p>No resource selected</p>
+        </div>
+        <details class="planner-diagram-source">
+          <summary>Raw diagram_mermaid</summary>
+          <pre><code>${escapeHtml(diagram || "No diagram_mermaid returned.")}</code></pre>
+        </details>
+      </section>
+    `;
+  }
+
+  function renderArchitectureDiagram(blueprint) {
+    const container = document.querySelector("[data-planner-diagram]");
+    if (!container) return;
+
+    const diagramMermaid = container.dataset.diagramSource || "";
+    const parsed = parseMermaidDiagram(diagramMermaid);
+    console.log("[Diagram Debug] raw diagram_mermaid:", diagramMermaid);
+    console.log("[Diagram Debug] parsed nodes:", parsed.nodes);
+    console.log("[Diagram Debug] parsed edges:", parsed.edges);
+    if (!parsed.nodes.length) {
+      showDiagramError(
+        container,
+        diagramMermaid
+          ? "Could not parse diagram_mermaid. Check the generated diagram format."
+          : "No diagram_mermaid was returned for this blueprint.",
+      );
+      updateDiagramDetail(null, blueprint);
+      return;
+    }
+
+    const resourceLookup = diagramResourceLookup(blueprint);
+    const diagram = layoutDiagram(parsed, resourceLookup);
+    const selected = state.selectedDiagramNode && parsed.nodes.some((node) => node.id === state.selectedDiagramNode)
+      ? state.selectedDiagramNode
+      : parsed.nodes[0]?.id;
+    state.selectedDiagramNode = selected || "";
+
+    container.innerHTML = diagramSvg(diagram, selected);
+    updateDiagramDetail(resourceLookup.get(selected) || parsed.nodes.find((node) => node.id === selected), blueprint);
+  }
+
+  function showDiagramError(container, message) {
+    container.innerHTML = `
+      <div class="planner-diagram-error" role="alert">
+        <strong>Diagram unavailable</strong>
+        <p>${escapeHtml(message)}</p>
+      </div>
+    `;
+  }
+
+  function parseMermaidDiagram(source) {
+    const nodes = new Map();
+    const edges = [];
+    const nodePattern = /^\s*([A-Za-z0-9_]+)\s*(?:\[\("([^"]+)"\)\]|\["([^"]+)"\]|\[([^\]]+)\])/;
+    const edgePattern = /^\s*([A-Za-z0-9_]+)\s*-->\s*([A-Za-z0-9_]+)/;
+
+    source.split(/\r?\n/).forEach((line) => {
+      const edge = line.match(edgePattern);
+      if (edge) {
+        const [, from, to] = edge;
+        edges.push({ from, to });
+        if (!nodes.has(from)) nodes.set(from, { id: from, label: from });
+        if (!nodes.has(to)) nodes.set(to, { id: to, label: to });
+        return;
+      }
+
+      const node = line.match(nodePattern);
+      if (node) {
+        const [, id, databaseLabel, quotedLabel, plainLabel] = node;
+        nodes.set(id, {
+          id,
+          label: databaseLabel || quotedLabel || plainLabel || id,
+          shape: databaseLabel ? "database" : "box",
+        });
+      }
+    });
+
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  function diagramResourceLookup(blueprint) {
+    const resources = Array.isArray(blueprint.resources) ? blueprint.resources : [];
+    return new Map(resources.map((resource) => [mermaidNodeId(resource.id), resource]));
+  }
+
+  function mermaidNodeId(value) {
+    const normalized = String(value || "")
+      .replace(/[^0-9A-Za-z_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+    return `node_${normalized || "resource"}`;
+  }
+
+  function layoutDiagram(parsed, resourceLookup) {
+    const outgoing = new Map(parsed.nodes.map((node) => [node.id, []]));
+    const incoming = new Map(parsed.nodes.map((node) => [node.id, []]));
+    parsed.edges.forEach((edge) => {
+      outgoing.get(edge.from)?.push(edge.to);
+      incoming.get(edge.to)?.push(edge.from);
+    });
+
+    const levels = new Map();
+    const roots = parsed.nodes.filter((node) => !(incoming.get(node.id) || []).length);
+    const queue = (roots.length ? roots : parsed.nodes.slice(0, 1)).map((node) => {
+      levels.set(node.id, 0);
+      return node.id;
+    });
+
+    while (queue.length) {
+      const id = queue.shift();
+      const nextLevel = (levels.get(id) || 0) + 1;
+      (outgoing.get(id) || []).forEach((target) => {
+        if (!levels.has(target) || nextLevel > levels.get(target)) {
+          levels.set(target, nextLevel);
+          queue.push(target);
+        }
+      });
+    }
+
+    parsed.nodes.forEach((node) => {
+      if (!levels.has(node.id)) levels.set(node.id, 0);
+    });
+
+    const grouped = new Map();
+    parsed.nodes.forEach((node) => {
+      const level = levels.get(node.id) || 0;
+      grouped.set(level, [...(grouped.get(level) || []), node]);
+    });
+
+    const columnWidth = 238;
+    const rowHeight = 112;
+    const nodeWidth = 176;
+    const nodeHeight = 58;
+    const padding = 54;
+    const maxRows = Math.max(...[...grouped.values()].map((items) => items.length), 1);
+    const maxLevel = Math.max(...[...levels.values()], 0);
+    const width = Math.max(720, padding * 2 + maxLevel * columnWidth + nodeWidth);
+    const height = Math.max(300, padding * 2 + (maxRows - 1) * rowHeight + nodeHeight);
+    const nodes = [];
+
+    [...grouped.entries()].sort(([left], [right]) => left - right).forEach(([level, items]) => {
+      const columnHeight = (items.length - 1) * rowHeight;
+      const startY = (height - columnHeight - nodeHeight) / 2;
+      items.forEach((node, index) => {
+        const resource = resourceLookup.get(node.id) || {};
+        nodes.push({
+          ...node,
+          x: padding + level * columnWidth,
+          y: startY + index * rowHeight,
+          width: nodeWidth,
+          height: nodeHeight,
+          service: resource.service || "",
+          risk_level: resource.risk_level || "",
+          visibility: resource.visibility || "",
+        });
+      });
+    });
+
+    const positioned = new Map(nodes.map((node) => [node.id, node]));
+    return {
+      width,
+      height,
+      nodes,
+      edges: parsed.edges.filter((edge) => positioned.has(edge.from) && positioned.has(edge.to)),
+      positioned,
+    };
+  }
+
+  function diagramSvg(diagram, selectedId) {
+    const scale = state.diagramScale;
+    const edges = diagram.edges.map((edge) => {
+      const from = diagram.positioned.get(edge.from);
+      const to = diagram.positioned.get(edge.to);
+      const x1 = from.x + from.width;
+      const y1 = from.y + from.height / 2;
+      const x2 = to.x;
+      const y2 = to.y + to.height / 2;
+      const mid = Math.max(24, (x2 - x1) / 2);
+      return `<path class="planner-diagram-edge${edge.from === selectedId || edge.to === selectedId ? " active" : ""}" d="M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}" marker-end="url(#planner-diagram-arrow)" />`;
+    }).join("");
+
+    const nodes = diagram.nodes.map((node) => {
+      const selected = node.id === selectedId;
+      const service = node.service ? `<text x="${node.x + 14}" y="${node.y + 43}" class="planner-diagram-node__meta">${escapeHtml(node.service)}</text>` : "";
+      return `<g class="planner-diagram-node${selected ? " active" : ""} planner-diagram-node--${safeClassName(node.service || "resource")}"
+          data-diagram-node="${escapeHtml(node.id)}" tabindex="0" role="button" aria-label="${escapeHtml(node.label)}">
+        <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="8" />
+        <text x="${node.x + 14}" y="${node.y + 25}" class="planner-diagram-node__label">${escapeHtml(truncateLabel(node.label, 25))}</text>
+        ${service}
+      </g>`;
+    }).join("");
+
+    return `<div class="planner-diagram__canvas" style="width:${diagram.width * scale}px;height:${diagram.height * scale}px">
+      <svg viewBox="0 0 ${diagram.width} ${diagram.height}" style="width:${diagram.width * scale}px;height:${diagram.height * scale}px" role="img" aria-label="Rendered architecture diagram">
+        <defs>
+          <marker id="planner-diagram-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" />
+          </marker>
+        </defs>
+        ${edges}
+        ${nodes}
+      </svg>
+    </div>`;
+  }
+
+  function truncateLabel(value, limit) {
+    const text = String(value || "");
+    return text.length > limit ? `${text.slice(0, limit - 1)}...` : text;
+  }
+
+  function safeClassName(value) {
+    return String(value || "resource").replace(/[^a-zA-Z0-9_-]+/g, "-").toLowerCase();
+  }
+
+  function updateDiagramDetail(item, blueprint) {
+    const detail = document.querySelector("[data-diagram-detail]");
+    if (!detail) return;
+    if (!item) {
+      detail.innerHTML = "<span>Resource details</span><p>No resource selected</p>";
+      return;
+    }
+
+    const resources = Array.isArray(blueprint.resources) ? blueprint.resources : [];
+    const resource = item.id && item.label && !item.service
+      ? resources.find((candidate) => mermaidNodeId(candidate.id) === item.id) || item
+      : item;
+    const monthly = resource.estimated_monthly_cost === undefined
+      ? ""
+      : `<dd>${escapeHtml(currencyFormatter(blueprint.estimated_cost?.currency).format(Number(resource.estimated_monthly_cost || 0)))}</dd>`;
+    detail.innerHTML = `
+      <span>Resource details</span>
+      <strong>${escapeHtml(resource.name || resource.label || "Architecture node")}</strong>
+      <dl>
+        <div><dt>Service</dt><dd>${escapeHtml(resource.service || "-")}</dd></div>
+        <div><dt>Type</dt><dd>${escapeHtml(resource.type || resource.shape || "-")}</dd></div>
+        <div><dt>Visibility</dt><dd>${escapeHtml(titleCase(resource.visibility || "-"))}</dd></div>
+        <div><dt>Risk</dt><dd>${escapeHtml(titleCase(resource.risk_level || "-"))}</dd></div>
+        ${monthly ? `<div><dt>Monthly</dt>${monthly}</div>` : ""}
+      </dl>
+    `;
+  }
+
+  function resourcesPanel(blueprint) {
+    const resources = Array.isArray(blueprint.resources) ? blueprint.resources : [];
+    const rows = resources.map((resource) => `
+      <tr>
+        <td>
+          <strong>${escapeHtml(resource.name)}</strong>
+          <code>${escapeHtml(resource.id)}</code>
+        </td>
+        <td>${escapeHtml(resource.service || "-")}</td>
+        <td>${escapeHtml(resource.type || "-")}</td>
+        <td>${badge(titleCase(resource.visibility), visibilityTone(resource.visibility), "planner-badge--compact")}</td>
+        <td>${badge(titleCase(resource.risk_level), riskTone(resource.risk_level), "planner-badge--compact")}</td>
+        <td class="planner-table__cost">${escapeHtml(currencyFormatter(blueprint.estimated_cost?.currency).format(Number(resource.estimated_monthly_cost || 0)))}</td>
+      </tr>
+    `).join("");
+
+    return `
+      <section class="planner-panel planner-panel--resources">
+        ${panelHeader(icons.resources, "Resources", `<span>${resources.length} planned</span>`)}
+        <div class="planner-table-wrap">
+          ${resources.length ? `
+            <table class="planner-table">
+              <thead>
+                <tr>
+                  <th>Resource</th>
+                  <th>Service</th>
+                  <th>Type</th>
+                  <th>Visibility</th>
+                  <th>Risk</th>
+                  <th>Monthly</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          ` : '<p class="planner-muted">No resources were returned for this blueprint.</p>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function costPanel(blueprint) {
+    const estimate = blueprint.estimated_cost || {};
+    const format = currencyFormatter(estimate.currency);
+    const total = format.format(Number(estimate.estimated_monthly_total || 0));
+    const breakdown = estimate.breakdown && typeof estimate.breakdown === "object"
+      ? Object.entries(estimate.breakdown)
+      : [];
+    const assumptions = Array.isArray(estimate.assumptions) ? estimate.assumptions : [];
+
+    return `
+      <section class="planner-panel planner-panel--cost">
+        ${panelHeader(icons.cost, "Cost Estimate", `<span>${escapeHtml(estimate.currency || "USD")}</span>`)}
+        <div class="planner-cost-total">
+          <span>Total monthly</span>
+          <strong>${escapeHtml(total)}</strong>
+        </div>
+        ${breakdown.length ? `
+          <dl class="planner-cost-list">
+            ${breakdown.map(([name, value]) => `
+              <div>
+                <dt>${escapeHtml(name)}</dt>
+                <dd>${escapeHtml(format.format(Number(value || 0)))}</dd>
+              </div>
+            `).join("")}
+          </dl>
+        ` : ""}
+        ${assumptions.length ? `<p class="planner-muted">${escapeHtml(assumptions[0])}</p>` : ""}
+      </section>
+    `;
+  }
+
+  function securityPanel(blueprint) {
+    const review = blueprint.security_review || {};
+    const warnings = Array.isArray(review.warnings) ? review.warnings : [];
+    const risk = review.risk_level || "low";
+    const warningRows = warnings.map((warning) => `
+      <li class="planner-warning">
+        ${badge(titleCase(warning.severity), riskTone(warning.severity), "planner-badge--compact")}
+        <div>
+          <strong>${escapeHtml(warning.message)}</strong>
+          ${warning.resource_id ? `<code>${escapeHtml(warning.resource_id)}</code>` : ""}
+          ${warning.recommendation ? `<p>${escapeHtml(warning.recommendation)}</p>` : ""}
+        </div>
+      </li>
+    `).join("");
+
+    return `
+      <section class="planner-panel planner-panel--security">
+        ${panelHeader(icons.shield, "Security Review", badge(titleCase(risk), riskTone(risk)))}
+        <div class="planner-security-score">
+          <span>Score</span>
+          <strong>${Number(review.security_score ?? 0)}</strong>
+          <small>${review.passed ? "Passed" : "Needs review"}</small>
+        </div>
+        <p class="planner-security-summary">${escapeHtml(review.summary || "Security review completed.")}</p>
+        ${warnings.length ? `
+          <ul class="planner-warning-list">${warningRows}</ul>
+        ` : '<p class="planner-muted">No security warnings were returned for this blueprint.</p>'}
+      </section>
+    `;
+  }
+
+  async function handleGenerate(form) {
+    const prompt = form.elements.prompt.value.trim();
+    state.prompt = prompt;
+    state.error = "";
+
+    if (!prompt) {
+      state.error = "Describe what you want CloudForge to deploy.";
+      renderPlannerBody();
+      return;
+    }
+
+    state.loading = true;
+    renderPlannerBody();
+    try {
+      const blueprint = await global.api.request("POST", "/blueprints/generate", { prompt });
+      state.activeBlueprint = blueprint;
+      state.deployment = null;
+      state.deploymentHistory = [];
+      state.selectedDiagramNode = "";
+      state.diagramScale = 1;
+      state.prompt = blueprint.user_prompt || prompt;
+      state.executionError = "";
+      state.showHighRiskOverride = false;
+      persistBlueprint(blueprint);
+      global.Components.toast("Blueprint generated.", "success");
+    } catch (error) {
+      state.error = error.message || "The blueprint API request failed.";
+    } finally {
+      state.loading = false;
+      renderPlannerBody();
+    }
+  }
+
+  async function updateBlueprint(action) {
+    const blueprintId = state.activeBlueprint?.blueprint_id;
+    if (!blueprintId || state.actionLoading) return;
+
+    state.actionLoading = action;
+    renderPlannerBody();
+    try {
+      const blueprint = await global.api.request("POST", `/blueprints/${encodeURIComponent(blueprintId)}/${action}`);
+      state.activeBlueprint = blueprint;
+      state.executionError = "";
+      state.showHighRiskOverride = false;
+      persistBlueprint(blueprint);
+      loadDeploymentHistory();
+      global.Components.toast(action === "save" ? "Plan saved." : "Blueprint approved.", "success");
+    } catch (error) {
+      global.Components.toast(error.message || "Unable to update blueprint.", "danger");
+    } finally {
+      state.actionLoading = "";
+      renderPlannerBody();
+    }
+  }
+
+  async function executeBlueprint(overrideHighRisk = false) {
+    const blueprintId = state.activeBlueprint?.blueprint_id;
+    if (!blueprintId || state.actionLoading) return;
+
+    const action = overrideHighRisk ? "execute-override" : "execute";
+    state.actionLoading = action;
+    state.executionError = "";
+    if (!overrideHighRisk) {
+      state.showHighRiskOverride = false;
+    }
+    renderPlannerBody();
+
+    try {
+      const deployment = await global.api.request(
+        "POST",
+        `/blueprints/${encodeURIComponent(blueprintId)}/execute`,
+        overrideHighRisk ? { override_high_risk: true } : {},
+      );
+      state.deployment = deployment;
+      state.deploymentHistory = [
+        deployment,
+        ...state.deploymentHistory.filter((item) => item.deployment_id !== deployment.deployment_id),
+      ];
+      state.showHighRiskOverride = false;
+      state.activeBlueprint = {
+        ...state.activeBlueprint,
+        status: deployment.status || state.activeBlueprint.status,
+        updated_at: deployment.updated_at || state.activeBlueprint.updated_at,
+      };
+      persistBlueprint(state.activeBlueprint);
+      global.Components.toast("Deployment dry-run completed.", "success");
+    } catch (error) {
+      const message = error.message || "Unable to execute blueprint.";
+      const detail = JSON.stringify(error.data || {});
+      state.executionError = message;
+      state.showHighRiskOverride = /high-risk|override_high_risk/i.test(`${message} ${detail}`);
+      await loadDeploymentHistory({ silent: true });
+      global.Components.toast(message, "danger");
+    } finally {
+      state.actionLoading = "";
+      renderPlannerBody();
+    }
+  }
+
+  async function loadDeploymentHistory(options = {}) {
+    const blueprintId = state.activeBlueprint?.blueprint_id;
+    if (!blueprintId || state.deploymentHistoryLoading) return;
+
+    state.deploymentHistoryLoading = true;
+    if (!options.silent) {
+      renderPlannerBody();
+    }
+
+    try {
+      const history = await global.api.request(
+        "GET",
+        `/blueprints/${encodeURIComponent(blueprintId)}/deployments`,
+      );
+      if (state.activeBlueprint?.blueprint_id !== blueprintId) return;
+
+      state.deploymentHistory = Array.isArray(history) ? history : [];
+      state.deployment = state.deploymentHistory[0] || state.deployment;
+      if (state.deployment) {
+        state.activeBlueprint = {
+          ...state.activeBlueprint,
+          status: state.deployment.status || state.activeBlueprint.status,
+          updated_at: state.deployment.updated_at || state.activeBlueprint.updated_at,
+        };
+        persistBlueprint(state.activeBlueprint);
+      }
+    } catch (error) {
+      if (!options.silent) {
+        global.Components.toast(error.message || "Unable to load deployment history.", "danger");
+      }
+    } finally {
+      state.deploymentHistoryLoading = false;
+      renderPlannerBody();
+    }
+  }
+
+  document.addEventListener("submit", (event) => {
+    if (event.target.id !== "planner-generate-form" || !isMounted()) return;
+    event.preventDefault();
+    handleGenerate(event.target);
+  });
+
+  document.addEventListener("input", (event) => {
+    if (event.target.id !== "planner-prompt" || !isMounted()) return;
+    state.prompt = event.target.value;
+    state.error = "";
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!isMounted()) return;
+
+    const zoomButton = event.target.closest("[data-diagram-zoom]");
+    if (zoomButton) {
+      const action = zoomButton.dataset.diagramZoom;
+      if (action === "in") state.diagramScale = Math.min(1.55, state.diagramScale + 0.15);
+      if (action === "out") state.diagramScale = Math.max(0.7, state.diagramScale - 0.15);
+      if (action === "reset") state.diagramScale = 1;
+      renderArchitectureDiagram(state.activeBlueprint || {});
+      return;
+    }
+
+    const diagramNode = event.target.closest("[data-diagram-node]");
+    if (diagramNode) {
+      state.selectedDiagramNode = diagramNode.dataset.diagramNode;
+      renderArchitectureDiagram(state.activeBlueprint || {});
+      return;
+    }
+
+    if (event.target.closest("[data-planner-retry]")) {
+      const form = document.getElementById("planner-generate-form");
+      if (form) handleGenerate(form);
+      return;
+    }
+
+    const actionButton = event.target.closest("[data-planner-action]");
+    if (actionButton) {
+      const action = actionButton.dataset.plannerAction;
+      if (action === "execute") {
+        executeBlueprint(false);
+      } else if (action === "execute-override") {
+        executeBlueprint(true);
+      } else {
+        updateBlueprint(action);
+      }
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!isMounted()) return;
+    const diagramNode = event.target.closest("[data-diagram-node]");
+    if (!diagramNode || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    state.selectedDiagramNode = diagramNode.dataset.diagramNode;
+    renderArchitectureDiagram(state.activeBlueprint || {});
+  });
+
+  global.Planner = { render, mount };
+})(window);

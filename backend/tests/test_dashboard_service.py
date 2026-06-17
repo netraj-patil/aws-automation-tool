@@ -1,0 +1,177 @@
+"""Unit tests for dashboard metric collection."""
+
+from botocore.exceptions import ClientError
+
+from app.services.dashboard_service import DashboardService
+
+
+class FakePaginator:
+    def __init__(self, pages=None, error=None):
+        self.pages = pages or []
+        self.error = error
+
+    def paginate(self):
+        if self.error:
+            raise self.error
+        return self.pages
+
+
+class FakeClient:
+    def __init__(self, paginators=None, responses=None):
+        self.paginators = paginators or {}
+        self.responses = responses or {}
+
+    def get_paginator(self, operation):
+        return self.paginators[operation]
+
+    def list_buckets(self):
+        return self.responses["list_buckets"]
+
+    def describe_vpcs(self):
+        return self.responses["describe_vpcs"]
+
+
+class FakeSession:
+    def __init__(self, clients):
+        self.clients = clients
+
+    def client(self, service, region_name=None):
+        return self.clients[service]
+
+
+def test_summary_excludes_default_vpc(monkeypatch) -> None:
+    ec2 = FakeClient(
+        paginators={
+            "describe_instances": FakePaginator(
+                [{"Reservations": []}]
+            )
+        },
+        responses={
+            "describe_vpcs": {
+                "Vpcs": [
+                    {
+                        "VpcId": "vpc-default",
+                        "State": "available",
+                        "IsDefault": True,
+                    },
+                    {
+                        "VpcId": "vpc-custom",
+                        "State": "available",
+                        "IsDefault": False,
+                    },
+                ]
+            }
+        },
+    )
+    session = FakeSession(
+        {
+            "ec2": ec2,
+            "s3": FakeClient(
+                responses={"list_buckets": {"Buckets": []}}
+            ),
+            "rds": FakeClient(
+                paginators={
+                    "describe_db_instances": FakePaginator(
+                        [{"DBInstances": []}]
+                    )
+                }
+            ),
+            "iam": FakeClient(
+                paginators={
+                    "list_users": FakePaginator([{"Users": []}])
+                }
+            ),
+        }
+    )
+    service = DashboardService()
+    monkeypatch.setattr(service, "_session", lambda credentials: session)
+
+    summary = service.get_summary("ap-south-1", {})
+
+    assert summary["vpc"] == {"custom": 1}
+    assert summary["permission_warnings"] == []
+
+
+def test_summary_keeps_other_metrics_when_permission_is_missing(
+    monkeypatch,
+) -> None:
+    denied = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "Denied"}},
+        "ListUsers",
+    )
+    ec2 = FakeClient(
+        paginators={
+            "describe_instances": FakePaginator(
+                [{"Reservations": []}]
+            )
+        },
+        responses={"describe_vpcs": {"Vpcs": []}},
+    )
+    session = FakeSession(
+        {
+            "ec2": ec2,
+            "s3": FakeClient(
+                responses={"list_buckets": {"Buckets": []}}
+            ),
+            "rds": FakeClient(
+                paginators={
+                    "describe_db_instances": FakePaginator(
+                        [{"DBInstances": []}]
+                    )
+                }
+            ),
+            "iam": FakeClient(
+                paginators={"list_users": FakePaginator(error=denied)}
+            ),
+        }
+    )
+    service = DashboardService()
+    monkeypatch.setattr(service, "_session", lambda credentials: session)
+
+    summary = service.get_summary("ap-south-1", {})
+
+    assert summary["iam"]["total"] is None
+    assert summary["s3"]["total"] == 0
+    assert summary["permission_warnings"] == ["IAM users"]
+
+
+def test_dashboard_uses_demo_data_when_credentials_are_invalid(monkeypatch) -> None:
+    invalid_credentials = ClientError(
+        {
+            "Error": {
+                "Code": "InvalidClientTokenId",
+                "Message": "The security token included in the request is invalid.",
+            }
+        },
+        "DescribeInstances",
+    )
+
+    def raise_invalid_credentials(*args, **kwargs):
+        raise invalid_credentials
+
+    service = DashboardService()
+    monkeypatch.setattr(service, "_session", lambda credentials: object())
+    for method_name in [
+        "_ec2_resources",
+        "_lambda_resources",
+        "_s3_resources",
+        "_rds_resources",
+        "_ecs_resources",
+        "_cloudformation_resources",
+        "_tagged_resources",
+        "_broken_cloudwatch",
+        "_broken_cloudformation",
+        "_broken_ec2_status",
+        "_broken_ecs",
+        "_broken_lambda",
+        "_collect_costs",
+    ]:
+        monkeypatch.setattr(service, method_name, raise_invalid_credentials)
+
+    dashboard = service.get_dashboard("us-east-1", {"aws_access_key_id": "bad"})
+
+    assert dashboard["mode"] == "demo"
+    assert dashboard["banner"] == (
+        "Showing default demo data. Add AWS credentials to monitor your real AWS account."
+    )
+    assert dashboard["summary"]["total_resources"] > 0

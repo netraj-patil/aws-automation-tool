@@ -1,12 +1,18 @@
+"""LangChain tools and schemas for supported AWS automation operations."""
+
 import json
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
-# from app.utils.logging_decorator import logger
 import boto3
 from langchain_core.tools import tool
 import os
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError
+
+from app.utils.logging_decorator import get_logger
+
+
+logger = get_logger(__name__)
 ##EC2 TOOL WITH boto3 client As ec2. 
 
 load_dotenv()
@@ -24,17 +30,20 @@ class CreateVPCInput(BaseModel):
     vpc_name: str = Field(..., description="Name tag for the VPC, e.g., 'my-website-vpc'.")
     cidr_block: str = Field("10.0.0.0/16", description="CIDR block for the VPC.")
     subnet_cidr: str = Field("10.0.1.0/24", description="CIDR block for the public subnet.")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS Access Key ID.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS Secret Access Key.")
+    region: str = Field(..., description="AWS region for the VPC.")
+    aws_access_key_id: str = Field(..., description="AWS Access Key ID.")
+    aws_secret_access_key: str = Field(..., description="AWS Secret Access Key.")
 
 class DeleteVPCInput(BaseModel):
     vpc_id: str = Field(..., description="The VPC ID to delete, e.g., 'vpc-0abc123'.")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS Access Key ID.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS Secret Access Key.")
+    region: str = Field(..., description="AWS region containing the VPC.")
+    aws_access_key_id: str = Field(..., description="AWS Access Key ID.")
+    aws_secret_access_key: str = Field(..., description="AWS Secret Access Key.")
 
 class GetVPCDetailsInput(BaseModel):
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS Access Key ID.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS Secret Access Key.")
+    region: str = Field(..., description="AWS region to query.")
+    aws_access_key_id: str = Field(..., description="AWS Access Key ID.")
+    aws_secret_access_key: str = Field(..., description="AWS Secret Access Key.")
 
 
 # --------------------------------------------------------------------------------
@@ -52,8 +61,9 @@ class CreateRDSInstanceInput(BaseModel):
     publicly_accessible: bool = Field(True, description="Whether the instance is publicly accessible. Default: True")
     multi_az: bool = Field(False, description="Enable Multi-AZ deployment for high availability. Default: False")
     storage_type: str = Field("gp3", description="Storage type. Default: gp3")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS Access Key ID for authentication.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS Secret Access Key for authentication.")
+    region: str = Field(..., description="AWS region for the RDS instance.")
+    aws_access_key_id: str = Field(..., description="AWS Access Key ID for authentication.")
+    aws_secret_access_key: str = Field(..., description="AWS Secret Access Key for authentication.")
 
 
 
@@ -61,8 +71,9 @@ class DeleteRDSInstanceInput(BaseModel):
     """Input schema for deleting an RDS instance."""
     db_instance_identifier: str = Field(..., description="Unique identifier of the RDS instance to delete, e.g., 'mydatabase'.")
     skip_final_snapshot: bool = Field(True, description="If True, no final snapshot will be created. Default: True")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS Access Key ID for authentication.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS Secret Access Key for authentication.")
+    region: str = Field(..., description="AWS region containing the RDS instance.")
+    aws_access_key_id: str = Field(..., description="AWS Access Key ID for authentication.")
+    aws_secret_access_key: str = Field(..., description="AWS Secret Access Key for authentication.")
 
 
 # --------------------------------------------------------------------------------
@@ -87,8 +98,9 @@ class CreateEC2InstanceInput(BaseModel):
     associate_public_ip: bool = Field(True, description="Whether to assign a public IP. Defaults to True.")
     subnet_id: str = Field(None, description="Optional subnet ID for network interface.")
     security_group_name: str = Field("AutoSG", description="Security Group name. Defaults to 'AutoSG'.")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS Access Key ID for the user.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS Secret Access Key for the user.")
+    region: str = Field(..., description="AWS region for the EC2 instance.")
+    aws_access_key_id: str = Field(..., description="AWS Access Key ID for the user.")
+    aws_secret_access_key: str = Field(..., description="AWS Secret Access Key for the user.")
 
 
 from pydantic import BaseModel, Field
@@ -98,21 +110,32 @@ class DeleteEC2InstanceInput(BaseModel):
     Input schema for deleting an EC2 instance by its Name tag.
     """
     instance_name: str = Field(..., description="The Name tag of the EC2 instance to terminate.")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS access key ID for authentication.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS secret access key for authentication.")
+    region: str = Field(..., description="AWS region containing the EC2 instance.")
+    aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
+    aws_secret_access_key: str = Field(..., description="AWS secret access key for authentication.")
 
 class ListS3BucketsInput(BaseModel):
     """Input schema for listing S3 buckets."""
     aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
     aws_secret_access_key: str = Field(..., description="AWS secret access key for authentication.")
+
+
+class ListRunningEC2InstancesInput(BaseModel):
+    """Input schema for listing running EC2 instances in a region."""
+
+    region: str = Field(..., description="AWS region to query.")
+    aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
+    aws_secret_access_key: str = Field(..., description="AWS secret access key for authentication.")
+
+
 #==================================================================================================
 #resource ecplorer
 #=====================================================================================================
 class ListResourcesInRegionInput(BaseModel):
     """Input schema for listing AWS resources in a region via Resource Explorer."""
     region: str = Field(..., description="AWS region to query, e.g., 'ap-south-1'.")
-    AWS_ACCESS_KEY_ID: str = Field(..., description="AWS access key ID for authentication.")
-    SECRET_KEY_ACCESS: str = Field(..., description="AWS secret access key for authentication.")
+    aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
+    aws_secret_access_key: str = Field(..., description="AWS secret access key for authentication.")
 
 
 
@@ -141,6 +164,7 @@ class SetBucketPolicyInput(BaseModel):
 class SetBucketPolicyOutput(BaseModel):
     """Output schema confirming the policy update."""
     status: str = Field(..., description="Result of the policy update operation.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 class EnableS3VersioningInput(BaseModel):
     """Input schema for enabling or suspending versioning on an S3 bucket."""
@@ -169,6 +193,7 @@ class SetS3BucketEncryptionOutput(BaseModel):
     """Output schema for setting bucket encryption."""
     status: str = Field(..., description="Result of the encryption operation.")
     encryption_type: str = Field(..., description="The applied encryption type.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 class ConfigureS3ObjectLockInput(BaseModel):
     """Input schema for configuring S3 Object Lock on a bucket."""
@@ -181,6 +206,7 @@ class ConfigureS3ObjectLockInput(BaseModel):
 
 class ConfigureS3ObjectLockOutput(BaseModel):
     """Output schema for Object Lock configuration."""
+    status: str = Field(..., description="Operation status.")
     message: str = Field(..., description="Result of Object Lock configuration.")
 
 class ConfigureLifecycleRuleInput(BaseModel):
@@ -206,6 +232,7 @@ class ConfigureBucketLoggingOutput(BaseModel):
     status: str = Field(..., description="Result message about logging configuration.")
     bucket_name: str = Field(..., description="Name of the S3 bucket.")
     logging_enabled: bool = Field(..., description="True if logging enabled, False otherwise.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 class ConfigureBucketReplicationInput(BaseModel):
     """Input schema for enabling replication on an S3 bucket."""
@@ -223,6 +250,7 @@ class ConfigureBucketReplicationOutput(BaseModel):
     status: str = Field(..., description="Result message about replication configuration.")
     source_bucket: str = Field(..., description="Source S3 bucket name.")
     replication_enabled: bool = Field(..., description="True if replication rule is enabled.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 class ConfigureBucketEventNotificationInput(BaseModel):
     """Input schema for configuring S3 bucket event notifications."""
     aws_access_key_id: str = Field(..., description="AWS access key ID for authentication.")
@@ -236,6 +264,7 @@ class ConfigureBucketEventNotificationOutput(BaseModel):
     status: str = Field(..., description="Result message about the event notification setup.")
     bucket_name: str = Field(..., description="Bucket name where event notifications were configured.")
     events: List[str] = Field(..., description="Events configured for notifications.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 class CreateBucketInput(BaseModel):
     """Input schema for creating an S3 bucket."""
@@ -250,6 +279,7 @@ class CreateBucketOutput(BaseModel):
     status: str = Field(..., description="Result message.")
     bucket_name: str = Field(..., description="Name of the created bucket.")
     region: str = Field(..., description="Region where the bucket was created.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 class DeleteBucketInput(BaseModel):
     """Input schema for deleting an S3 bucket."""
@@ -262,6 +292,7 @@ class DeleteBucketOutput(BaseModel):
     """Output schema for deleting an S3 bucket."""
     status: str = Field(..., description="Result message.")
     bucket_name: str = Field(..., description="Name of the deleted bucket.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 # create IAM User
 class CreateIAMUserInput(BaseModel):
@@ -275,6 +306,7 @@ class CreateIAMUserOutput(BaseModel):
     """Output for creating an IAM user."""
     status: str = Field(..., description="Result message.")
     user_arn: str = Field(..., description="ARN of the created IAM user.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 # Delete User
 class DeleteIAMUserInput(BaseModel):
@@ -285,6 +317,7 @@ class DeleteIAMUserInput(BaseModel):
 
 class DeleteIAMUserOutput(BaseModel):
     status: str
+    message: Optional[str] = None
 
 
 #IAM Attach Policy
@@ -300,6 +333,7 @@ class AttachPolicyOutput(BaseModel):
     status: str
     user_name: str
     policy_arn: str
+    message: Optional[str] = None
 
 # Detach Policy
 class DetachPolicyInput(BaseModel):
@@ -311,6 +345,7 @@ class DetachPolicyInput(BaseModel):
 
 class DetachPolicyOutput(BaseModel):
     status: str
+    message: Optional[str] = None
 
 
 
@@ -327,6 +362,7 @@ class CreateAccessKeyOutput(BaseModel):
     new_access_key_id: str = Field(..., description="The newly created access key ID.")
     new_secret_access_key: str = Field(..., description="The new secret access key. This is the only time it will be shown.")
     status: str = Field(..., description="The result of the operation.")
+    message: Optional[str] = Field(None, description="Additional operation details.")
 
 # Create Custom Policy
 class CreatePolicyInput(BaseModel):
@@ -339,6 +375,7 @@ class CreatePolicyInput(BaseModel):
 class CreatePolicyOutput(BaseModel):
     policy_arn: str
     status: str
+    message: Optional[str] = None
 
 
 # Rotate Access keys
@@ -353,6 +390,7 @@ class RotateAccessKeyOutput(BaseModel):
     new_access_key_id: str
     new_secret_access_key: str
     status: str
+    message: Optional[str] = None
 
 # Attach role to EC2 Instance
 class AttachInstanceProfileInput(BaseModel):
@@ -367,10 +405,12 @@ class AttachInstanceProfileInput(BaseModel):
 class AttachInstanceProfileOutput(BaseModel):
     """Output after attaching the instance profile."""
     status: str
+    message: Optional[str] = None
 # get function
 def get_all_aws_tools():
     return [
         list_s3_buckets,
+        list_running_ec2_instances,
         get_bucket_region,
         set_s3_bucket_policy,
         enable_s3_versioning,
@@ -392,6 +432,7 @@ def get_all_aws_tools():
         create_rds_instance,
         delete_rds_instance,
         create_ec2_instance,
+        list_resources_in_region,
         get_vpc_details,
         create_vpc,
         delete_vpc,
@@ -399,7 +440,7 @@ def get_all_aws_tools():
     ]
 
 # Tools
-@tool(args_schema=ListS3BucketsInput, return_direct=True)
+@tool(args_schema=ListS3BucketsInput, return_direct=False)
 
 def list_s3_buckets(aws_access_key_id: str, aws_secret_access_key: str):
     """List all S3 buckets in the AWS account."""
@@ -413,7 +454,58 @@ def list_s3_buckets(aws_access_key_id: str, aws_secret_access_key: str):
     return [bucket['Name'] for bucket in response['Buckets']]
 
 
-@tool(args_schema=GetBucketRegionInput, return_direct=True)
+@tool(args_schema=ListRunningEC2InstancesInput, return_direct=False)
+def list_running_ec2_instances(
+    region: str,
+    aws_access_key_id: str,
+    aws_secret_access_key: str,
+) -> list[dict]:
+    """List running EC2 instances in the specified AWS region."""
+    ec2_client = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region,
+    )
+    instances = []
+    paginator = ec2_client.get_paginator("describe_instances")
+    for page in paginator.paginate(
+        Filters=[
+            {
+                "Name": "instance-state-name",
+                "Values": ["running"],
+            }
+        ]
+    ):
+        for reservation in page.get("Reservations", []):
+            for instance in reservation.get("Instances", []):
+                name = next(
+                    (
+                        tag.get("Value")
+                        for tag in instance.get("Tags", [])
+                        if tag.get("Key") == "Name"
+                    ),
+                    None,
+                )
+                instances.append(
+                    {
+                        "instance_id": instance.get("InstanceId"),
+                        "name": name,
+                        "instance_type": instance.get("InstanceType"),
+                        "state": instance.get("State", {}).get("Name"),
+                        "availability_zone": instance.get(
+                            "Placement", {}
+                        ).get("AvailabilityZone"),
+                        "private_ip_address": instance.get(
+                            "PrivateIpAddress"
+                        ),
+                        "public_ip_address": instance.get("PublicIpAddress"),
+                    }
+                )
+    return instances
+
+
+@tool(args_schema=GetBucketRegionInput, return_direct=False)
 
 def get_bucket_region(aws_access_key_id: str, aws_secret_access_key: str, bucket_name: str) -> GetBucketRegionOutput:
     """Get the region of a specific S3 bucket."""
@@ -426,7 +518,7 @@ def get_bucket_region(aws_access_key_id: str, aws_secret_access_key: str, bucket
     region = response.get('LocationConstraint', 'us-east-1')  # Default to us-east-1 if None
     return GetBucketRegionOutput(bucket_name=bucket_name, region=region)
 
-@tool(args_schema=SetBucketPolicyInput, return_direct=True)
+@tool(args_schema=SetBucketPolicyInput, return_direct=False)
 
 def set_s3_bucket_policy(aws_access_key_id: str, aws_secret_access_key: str, bucket_name: str, policy_type: str, custom_policy: Optional[dict] = None):
     s3_client = boto3.client(
@@ -438,29 +530,34 @@ def set_s3_bucket_policy(aws_access_key_id: str, aws_secret_access_key: str, buc
     try:
         if policy_type == "private":
             s3_client.put_bucket_acl(Bucket=bucket_name, ACL="private")
-            return {"status": f"Bucket '{bucket_name}' set to private."}
+            return SetBucketPolicyOutput(status="success", message=f"Bucket '{bucket_name}' set to private.")
 
         elif policy_type == "public-read":
             s3_client.put_bucket_acl(Bucket=bucket_name, ACL="public-read")
-            return {"status": f"Bucket '{bucket_name}' set to public-read."}
+            return SetBucketPolicyOutput(status="success", message=f"Bucket '{bucket_name}' set to public-read.")
 
         elif policy_type == "custom":
             if not custom_policy:
-                return {"status": "Custom policy not provided for policy_type='custom'."}
+                return SetBucketPolicyOutput(
+                    status="error",
+                    message="Custom policy is required when policy_type is 'custom'."
+                )
 
             s3_client.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps(custom_policy))
-            return {"status": f"Custom policy applied to bucket '{bucket_name}'."}
+            return SetBucketPolicyOutput(status="success", message=f"Custom policy applied to bucket '{bucket_name}'.")
 
         else:
-            return {"status": "Invalid policy_type. Choose from: private, public-read, custom."}
+            return SetBucketPolicyOutput(
+                status="error",
+                message="Invalid policy_type. Choose from: private, public-read, custom."
+            )
 
     except Exception as e:
-        # logger.error(f"Error setting bucket policy: {str(e)}")
-        return {"status": f"Failed to update policy: {str(e)}"}
+        return SetBucketPolicyOutput(status="error", message=str(e))
 
     
     
-@tool(args_schema=EnableS3VersioningInput, return_direct=True)
+@tool(args_schema=EnableS3VersioningInput, return_direct=False)
 
 def enable_s3_versioning(aws_access_key_id: str, aws_secret_access_key: str, bucket_name: str, status: str) -> EnableS3VersioningOutput:
     """
@@ -488,7 +585,7 @@ def enable_s3_versioning(aws_access_key_id: str, aws_secret_access_key: str, buc
 
     return EnableS3VersioningOutput(bucket_name=bucket_name, versioning_status=status)
 
-@tool(args_schema=SetS3BucketEncryptionInput, return_direct=True)
+@tool(args_schema=SetS3BucketEncryptionInput, return_direct=False)
 
 def set_s3_bucket_encryption(aws_access_key_id: str, aws_secret_access_key: str, bucket_name: str, encryption_type: str, kms_key_id: str | None = None) -> dict:
     """
@@ -525,7 +622,7 @@ def set_s3_bucket_encryption(aws_access_key_id: str, aws_secret_access_key: str,
     }
 
 
-@tool(args_schema=ConfigureS3ObjectLockInput, return_direct=True)
+@tool(args_schema=ConfigureS3ObjectLockInput, return_direct=False)
 
 def configure_s3_object_lock(
     aws_access_key_id: str,
@@ -557,13 +654,16 @@ def configure_s3_object_lock(
                     }
                 }
             )
-            return ConfigureS3ObjectLockOutput(message=f"Object Lock enabled on {bucket_name} with mode {lock_mode} for {retention_days} days.")
+            return ConfigureS3ObjectLockOutput(
+                status="success",
+                message=f"Object Lock enabled on {bucket_name} with mode {lock_mode} for {retention_days} days."
+            )
         except Exception as e:
-            return ConfigureS3ObjectLockOutput(message=f"Failed to configure Object Lock: {str(e)}")
+            return ConfigureS3ObjectLockOutput(status="error", message=str(e))
     else:
-        return ConfigureS3ObjectLockOutput(message=f"Object Lock not enabled on {bucket_name}.")
+        return ConfigureS3ObjectLockOutput(status="success", message=f"Object Lock not enabled on {bucket_name}.")
     
-@tool(args_schema=ConfigureLifecycleRuleInput, return_direct=True)
+@tool(args_schema=ConfigureLifecycleRuleInput, return_direct=False)
 
 def configure_lifecycle_rule(
     aws_access_key_id: str,
@@ -601,9 +701,9 @@ def configure_lifecycle_rule(
         )
         return {"status": f"Lifecycle rule {rule_id} added to {bucket_name}"}
     except Exception as e:
-        return {"status": f"Error: {str(e)}"}
+        raise RuntimeError(str(e)) from e
     
-@tool(args_schema=ConfigureBucketLoggingInput, return_direct=True)
+@tool(args_schema=ConfigureBucketLoggingInput, return_direct=False)
 
 def configure_bucket_logging(
     aws_access_key_id: str,
@@ -642,14 +742,14 @@ def configure_bucket_logging(
             logging_enabled=enable
         )
     except Exception as e:
-        # logger.error(f"Error configuring logging for bucket {bucket_name}: {e}")
         return ConfigureBucketLoggingOutput(
-            status=f"Error: {str(e)}",
+            status="error",
             bucket_name=bucket_name,
-            logging_enabled=False
+            logging_enabled=False,
+            message=str(e)
         )
     
-@tool(args_schema=ConfigureBucketReplicationInput, return_direct=True)
+@tool(args_schema=ConfigureBucketReplicationInput, return_direct=False)
 
 def configure_bucket_replication(
     aws_access_key_id: str,
@@ -692,14 +792,14 @@ def configure_bucket_replication(
             replication_enabled=(status == "Enabled")
         )
     except Exception as e:
-        # logger.error(f"Error configuring replication for bucket {source_bucket}: {e}")
         return ConfigureBucketReplicationOutput(
-            status=f"Error: {str(e)}",
+            status="error",
             source_bucket=source_bucket,
-            replication_enabled=False
+            replication_enabled=False,
+            message=str(e)
         )
     
-@tool(args_schema=ConfigureBucketEventNotificationInput, return_direct=True)
+@tool(args_schema=ConfigureBucketEventNotificationInput, return_direct=False)
 
 def configure_bucket_event_notification(
     aws_access_key_id: str,
@@ -736,14 +836,14 @@ def configure_bucket_event_notification(
             events=events
         )
     except Exception as e:
-        # logger.error(f"Error configuring event notification for bucket {bucket_name}: {e}")
         return ConfigureBucketEventNotificationOutput(
-            status=f"Error: {str(e)}",
+            status="error",
             bucket_name=bucket_name,
-            events=[]
+            events=[],
+            message=str(e)
         )
     
-@tool(args_schema=CreateBucketInput, return_direct=True)
+@tool(args_schema=CreateBucketInput, return_direct=False)
 
 def create_s3_bucket(
     aws_access_key_id: str,
@@ -767,19 +867,19 @@ def create_s3_bucket(
         s3_client.create_bucket(**create_args)
 
         return CreateBucketOutput(
-            status="Bucket created successfully.",
+            status="success",
             bucket_name=bucket_name,
             region=region
         )
     except Exception as e:
-        # logger.error(f"Error creating bucket {bucket_name}: {e}")
         return CreateBucketOutput(
-            status=f"Error: {str(e)}",
+            status="error",
             bucket_name=bucket_name,
-            region=region
+            region=region,
+            message=str(e)
         )
 
-@tool(args_schema=DeleteBucketInput, return_direct=True)
+@tool(args_schema=DeleteBucketInput, return_direct=False)
 
 def delete_s3_bucket(
     aws_access_key_id: str,
@@ -800,13 +900,13 @@ def delete_s3_bucket(
             bucket_name=bucket_name
         )
     except Exception as e:
-        # logger.error(f"Error deleting bucket {bucket_name}: {e}")
         return DeleteBucketOutput(
-            status=f"Error: {str(e)}",
-            bucket_name=bucket_name
+            status="error",
+            bucket_name=bucket_name,
+            message=str(e)
         )
     
-@tool(args_schema=CreateIAMUserInput, return_direct=True)
+@tool(args_schema=CreateIAMUserInput, return_direct=False)
 
 def create_iam_user(
     aws_access_key_id: str,
@@ -827,13 +927,13 @@ def create_iam_user(
             user_arn=response['User']['Arn']
         )
     except Exception as e:
-        # logger.error(f"Error creating IAM user {user_name}: {e}")
         return CreateIAMUserOutput(
-            status=f"Error: {str(e)}",
-            user_arn=""
+            status="error",
+            user_arn="",
+            message=str(e)
         )
     
-@tool(args_schema=DeleteIAMUserInput, return_direct=True)
+@tool(args_schema=DeleteIAMUserInput, return_direct=False)
 
 def delete_iam_user(
     aws_access_key_id: str,
@@ -846,10 +946,9 @@ def delete_iam_user(
         client.delete_user(UserName=user_name)
         return DeleteIAMUserOutput(status="User deleted successfully.")
     except Exception as e:
-        # logger.error(f"Error deleting IAM user: {e}")
-        return DeleteIAMUserOutput(status=f"Error: {str(e)}")
+        return DeleteIAMUserOutput(status="error", message=str(e))
     
-@tool(args_schema=AttachPolicyInput, return_direct=True)
+@tool(args_schema=AttachPolicyInput, return_direct=False)
 
 def attach_policy_to_user(
     aws_access_key_id: str,
@@ -864,10 +963,14 @@ def attach_policy_to_user(
         client.attach_user_policy(UserName=user_name, PolicyArn=policy_arn)
         return AttachPolicyOutput(status="Policy attached successfully.", user_name=user_name, policy_arn=policy_arn)
     except Exception as e:
-        # logger.error(f"Error attaching policy: {e}")
-        return AttachPolicyOutput(status=f"Error: {str(e)}", user_name=user_name, policy_arn=policy_arn)
+        return AttachPolicyOutput(
+            status="error",
+            user_name=user_name,
+            policy_arn=policy_arn,
+            message=str(e)
+        )
     
-@tool(args_schema=DetachPolicyInput, return_direct=True)
+@tool(args_schema=DetachPolicyInput, return_direct=False)
 
 def detach_policy_from_user(
     aws_access_key_id: str,
@@ -881,10 +984,9 @@ def detach_policy_from_user(
         client.detach_user_policy(UserName=user_name, PolicyArn=policy_arn)
         return DetachPolicyOutput(status="Policy detached successfully.")
     except Exception as e:
-        # logger.error(f"Error detaching policy: {e}")
-        return DetachPolicyOutput(status=f"Error: {str(e)}")
+        return DetachPolicyOutput(status="error", message=str(e))
 
-@tool(args_schema=CreateAccessKeyInput)
+@tool(args_schema=CreateAccessKeyInput, return_direct=False)
 
 def create_access_key_for_user(
     aws_access_key_id: str,
@@ -913,24 +1015,31 @@ def create_access_key_for_user(
 
     except ClientError as e:
         # Handle known AWS errors, like user not found or key limit exceeded.
-        error_message = f"Error: {e.response['Error']['Message']}"
-        logger.error(error_message)
+        error_message = e.response['Error']['Message']
+        logger.exception(
+            "Failed to create IAM access key",
+            extra={"user_name": user_name, "error": str(e)},
+        )
         return CreateAccessKeyOutput(
             new_access_key_id="",
             new_secret_access_key="",
-            status=error_message
+            status="error",
+            message=error_message
         )
         
     except Exception as e:
         # Handle other unexpected errors.
-        error_message = f"An unexpected error occurred: {str(e)}"
-        logger.error(error_message)
+        logger.exception(
+            "Unexpected IAM access key creation failure",
+            extra={"user_name": user_name, "error": str(e)},
+        )
         return CreateAccessKeyOutput(
             new_access_key_id="",
             new_secret_access_key="",
-            status=error_message
+            status="error",
+            message=str(e)
         )
-@tool(args_schema=CreatePolicyInput) # Removed return_direct=True for easier inspection
+@tool(args_schema=CreatePolicyInput, return_direct=False)
 
 def create_custom_policy(
     aws_access_key_id: str,
@@ -944,10 +1053,9 @@ def create_custom_policy(
         response = client.create_policy(PolicyName=policy_name, PolicyDocument=policy_document)
         return CreatePolicyOutput(policy_arn=response['Policy']['Arn'], status="Policy created successfully.")
     except Exception as e:
-        # logger.error(f"Error creating custom policy: {e}")
-        return CreatePolicyOutput(policy_arn="", status=f"Error: {str(e)}")
+        return CreatePolicyOutput(policy_arn="", status="error", message=str(e))
 
-@tool(args_schema=RotateAccessKeyInput, return_direct=True)
+@tool(args_schema=RotateAccessKeyInput, return_direct=False)
 
 def rotate_access_key(
     aws_access_key_id: str,
@@ -975,12 +1083,17 @@ def rotate_access_key(
             status="Rotation successful"
         )
     except Exception as e:
-        # logger.error(f"Error rotating access key: {e}")
-        return RotateAccessKeyOutput(old_key_status="", new_access_key_id="", new_secret_access_key="", status=f"Error: {str(e)}")
+        return RotateAccessKeyOutput(
+            old_key_status="",
+            new_access_key_id="",
+            new_secret_access_key="",
+            status="error",
+            message=str(e)
+        )
     
 
 
-@tool(args_schema=AttachInstanceProfileInput) # Removed return_direct for easier inspection
+@tool(args_schema=AttachInstanceProfileInput, return_direct=False)
 
 def attach_instance_profile_to_ec2(
     aws_access_key_id: str,
@@ -1004,8 +1117,7 @@ def attach_instance_profile_to_ec2(
         )
         return AttachInstanceProfileOutput(status="Instance profile attached successfully.")
     except Exception as e:
-        # logger.error(f"Error attaching instance profile to EC2: {e}")
-        return AttachInstanceProfileOutput(status=f"Error: {str(e)}")
+        return AttachInstanceProfileOutput(status="error", message=str(e))
 
 # Tayyab
 #===============================================================================
@@ -1075,7 +1187,7 @@ def get_device_name(os_type: str, volume_index: int) -> str:
         return f"/dev/sd{chr(ord('a') + volume_index - 1)}" # /dev/sda, /dev/sdb, etc.
 
 
-@tool("create_ec2_instance", return_direct=True)
+@tool("create_ec2_instance", args_schema=CreateEC2InstanceInput, return_direct=False)
 
 def create_ec2_instance(
     friendly_name: str = None,   # Example: "Windows_Server 2016"
@@ -1091,40 +1203,43 @@ def create_ec2_instance(
     associate_public_ip: bool = True,
     subnet_id: str = None,
     security_group_name: str = "AutoSG",
-    AWS_ACCESS_KEY_ID: str = None,
-    SECRET_KEY_ACCESS: str = None,
+    region: str = None,
+    aws_access_key_id: str = None,
+    aws_secret_access_key: str = None,
 ) -> str:
     """
     Launches an EC2 instance.
     Only essentials: friendly_name (or image_id internally), instance_type, min_count, max_count.
     Other parameters are optional.
     """
-    if not SECRET_KEY_ACCESS or not AWS_ACCESS_KEY_ID:
-        return "❌ 'AWS_ACCESS_KEY_ID' and 'SECRET_KEY_ACCESS' are required."
+    if not aws_secret_access_key or not aws_access_key_id:
+        raise ValueError("'aws_access_key_id' and 'aws_secret_access_key' are required.")
+    if not region:
+        raise ValueError("'region' is required.")
 
     ec2 = boto3.client(
     "ec2",
-    aws_access_key_id= AWS_ACCESS_KEY_ID,
-    aws_secret_access_key= SECRET_KEY_ACCESS,
-    region_name="ap-south-1"
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key,
+    region_name=region
 )
 
 
     # Convert friendly name to AMI ID
     if not friendly_name:
-        return "❌ 'friendly_name' is essential (e.g., 'Windows_Server 2016')."
+        raise ValueError("'friendly_name' is essential (e.g., 'Windows_Server 2016').")
     try:
         image_id = get_ami_id(friendly_name, ec2) # Pass ec2 client
     except Exception as e:
-        return f"❌ {str(e)}"
+        raise ValueError(str(e)) from e
 
     # Check other essentials
     if not instance_type:
-        return "❌ 'instance_type' is essential."
+        raise ValueError("'instance_type' is essential.")
     if not min_count:
-        return "❌ 'min_count' is essential."
+        raise ValueError("'min_count' is essential.")
     if not max_count:
-        return "❌ 'max_count' is essential."
+        raise ValueError("'max_count' is essential.")
 
     # KeyPair handling
     key_status = "No KeyPair specified; instance will have no SSH/RDP access."
@@ -1188,7 +1303,7 @@ def create_ec2_instance(
         return f"✅ EC2 instance '{ec2_name if ec2_name else instance_id}' created successfully with ID: {instance_id}\n{key_status}\nSecurity Group ID: {sg_id}"
 
     except Exception as e:
-        return f"❌ Error creating EC2 instance: {str(e)}"
+        raise RuntimeError(f"Failed to create EC2 instance: {e}") from e
 
 ##Deleting The Ec2 Instance 
 
@@ -1205,24 +1320,25 @@ def get_instance_id_by_name(ec2, instance_name: str) -> str:
     instance = reservations[0]["Instances"][0]
     return instance["InstanceId"]
 
-@tool("delete_ec2_instance", return_direct=True)
+@tool("delete_ec2_instance", args_schema=DeleteEC2InstanceInput, return_direct=False)
 def delete_ec2_instance(
     instance_name: str,
-    AWS_ACCESS_KEY_ID: str = None,
-    SECRET_KEY_ACCESS: str = None
+    region: str,
+    aws_access_key_id: str = None,
+    aws_secret_access_key: str = None
 ) -> str:
     """
     Terminates an EC2 instance by Name tag.
     """
-    if not SECRET_KEY_ACCESS or not AWS_ACCESS_KEY_ID:
-        return "❌ 'AWS_ACCESS_KEY_ID' and 'SECRET_KEY_ACCESS' are required."
+    if not aws_secret_access_key or not aws_access_key_id:
+        raise ValueError("'aws_access_key_id' and 'aws_secret_access_key' are required.")
 
     # Create EC2 client inside the function with user-provided credentials
     ec2 = boto3.client(
         "ec2",
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=SECRET_KEY_ACCESS,
-        region_name="ap-south-1"
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region
     )
 
     try:
@@ -1234,16 +1350,16 @@ def delete_ec2_instance(
         return f"✅ EC2 instance '{instance_name}' with ID '{instance_id}' is being terminated."
     
     except ValueError as ve:
-        return f"❌ {str(ve)}"
+        raise ValueError(str(ve)) from ve
     except Exception as e:
-        return f"❌ Error terminating EC2 instance: {str(e)}"
+        raise RuntimeError(f"Failed to terminate EC2 instance: {e}") from e
 
 
 # --------------------------------------------------------------------------------
 # 🔹 RDS TOOLS
 # --------------------------------------------------------------------------------
 
-@tool("create_rds_instance", return_direct=True)
+@tool("create_rds_instance", args_schema=CreateRDSInstanceInput, return_direct=False)
 def create_rds_instance(
     db_instance_identifier: str = None,  # Unique name for the RDS instance
     db_instance_class: str = "db.t3.micro",  # Instance size
@@ -1254,28 +1370,31 @@ def create_rds_instance(
     publicly_accessible: bool = True,
     multi_az: bool = False,
     storage_type: str = "gp3",
-    AWS_ACCESS_KEY_ID: str = None,
-    SECRET_KEY_ACCESS: str = None,
+    region: str = None,
+    aws_access_key_id: str = None,
+    aws_secret_access_key: str = None,
 ) -> str:
     """
     Launch an RDS instance with specified configuration.
     Only essentials: db_instance_identifier, engine, master_username, master_user_password.
     """
-    if not SECRET_KEY_ACCESS or not AWS_ACCESS_KEY_ID:
-        return "❌ 'AWS_ACCESS_KEY_ID' and 'SECRET_KEY_ACCESS' are required."
+    if not aws_secret_access_key or not aws_access_key_id:
+        raise ValueError("'aws_access_key_id' and 'aws_secret_access_key' are required.")
+    if not region:
+        raise ValueError("'region' is required.")
     rds = boto3.client(
     "rds",
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=SECRET_KEY_ACCESS,
-    region_name="ap-south-1"
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key,
+    region_name=region
 )
 
     if not db_instance_identifier:
-        return "❌ 'db_instance_identifier' is required."
+        raise ValueError("'db_instance_identifier' is required.")
     if not master_username:
-        return "❌ 'master_username' is required."
+        raise ValueError("'master_username' is required.")
     if not master_user_password:
-        return "❌ 'master_user_password' is required."
+        raise ValueError("'master_user_password' is required.")
 
     try:
         response = rds.create_db_instance(
@@ -1293,15 +1412,16 @@ def create_rds_instance(
         return f"✅ RDS instance '{db_instance_identifier}' is being created. Status: {response['DBInstance']['DBInstanceStatus']}"
 
     except Exception as e:
-        return f"❌ Error creating RDS instance: {str(e)}"
+        raise RuntimeError(f"Failed to create RDS instance: {e}") from e
 
 
-@tool("delete_rds_instance", return_direct=True)
+@tool("delete_rds_instance", args_schema=DeleteRDSInstanceInput, return_direct=False)
 def delete_rds_instance(
     db_instance_identifier: str,
     skip_final_snapshot: bool = True,
-    AWS_ACCESS_KEY_ID: str = None,
-    SECRET_KEY_ACCESS: str = None,
+    region: str = None,
+    aws_access_key_id: str = None,
+    aws_secret_access_key: str = None,
 ) -> str:
     """
     Deletes an RDS instance by DB identifier (name).
@@ -1309,14 +1429,16 @@ def delete_rds_instance(
     - skip_final_snapshot: If True, no snapshot is taken before deletion.
       If False, AWS requires a FinalDBSnapshotIdentifier.
     """
-    if not SECRET_KEY_ACCESS or not AWS_ACCESS_KEY_ID:
-        return "❌ 'AWS_ACCESS_KEY_ID' and 'SECRET_KEY_ACCESS' are required."
+    if not aws_secret_access_key or not aws_access_key_id:
+        raise ValueError("'aws_access_key_id' and 'aws_secret_access_key' are required.")
+    if not region:
+        raise ValueError("'region' is required.")
       
     rds = boto3.client(
     "rds",
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=SECRET_KEY_ACCESS,
-    region_name="ap-south-1"
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key,
+    region_name=region
 )
     try:
         if skip_final_snapshot:
@@ -1334,34 +1456,34 @@ def delete_rds_instance(
         status = response["DBInstance"]["DBInstanceStatus"]
         return f"🗑️ Deletion initiated for RDS instance '{db_instance_identifier}'. Current status: {status}"
     except Exception as e:
-        return f"❌ Error deleting RDS instance: {str(e)}"
+        raise RuntimeError(f"Failed to delete RDS instance: {e}") from e
 
 #===================================================================
 #REsource Explorer
 #===================================================================
 
-@tool("list_resources_in_region", return_direct=True)
+@tool("list_resources_in_region", args_schema=ListResourcesInRegionInput, return_direct=False)
 def list_resources_in_region(
     region: str = None,  # Required: AWS region to query, e.g., "ap-south-1"
-    AWS_ACCESS_KEY_ID: str = None,
-    SECRET_KEY_ACCESS: str = None,
+    aws_access_key_id: str = None,
+    aws_secret_access_key: str = None,
 ) -> str:
     """
     Lists all active AWS resources in the specified region using Resource Explorer.
     Only essential input: region.
     Returns a newline-separated string of resource ARNs.
     """
-    if not SECRET_KEY_ACCESS or not AWS_ACCESS_KEY_ID:
-        return "❌ 'AWS_ACCESS_KEY_ID' and 'SECRET_KEY_ACCESS' are required."
+    if not aws_secret_access_key or not aws_access_key_id:
+        raise ValueError("'aws_access_key_id' and 'aws_secret_access_key' are required.")
     if not region:
-        return "❌ 'region' is required. Example: 'ap-south-1'"
+        raise ValueError("'region' is required. Example: 'ap-south-1'.")
 
     try:
         # Initialize Resource Explorer client for the specified region
         re_client = boto3.client(
             "resource-explorer-2",
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=SECRET_KEY_ACCESS,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
             region_name=region
         )
 
@@ -1379,7 +1501,7 @@ def list_resources_in_region(
         return "\n".join(resources)
 
     except Exception as e:
-        return f"❌ Error fetching resources in region '{region}': {str(e)}"
+        raise RuntimeError(f"Failed to fetch resources in region '{region}': {e}") from e
 
 
 # --------------------------------------------------------------------------------
@@ -1432,10 +1554,15 @@ def cleanup_vpc_dependencies(ec2, vpc_id: str):
 #====================================================================================================
 #==========================ACTUAL VPC TOOLS==========================================================
 #====================================================================================================
-@tool("get_vpc_details", args_schema=GetVPCDetailsInput, return_direct=True)
-def get_vpc_details(AWS_ACCESS_KEY_ID: str, SECRET_KEY_ACCESS: str) -> str:
+@tool("get_vpc_details", args_schema=GetVPCDetailsInput, return_direct=False)
+def get_vpc_details(region: str, aws_access_key_id: str, aws_secret_access_key: str) -> str:
     """Lists all VPCs and their associated subnets."""
-    ec2 = boto3.client("ec2", aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=SECRET_KEY_ACCESS, region_name="ap-south-1")
+    ec2 = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region
+    )
     try:
         vpcs = ec2.describe_vpcs()["Vpcs"]
         output = []
@@ -1443,18 +1570,31 @@ def get_vpc_details(AWS_ACCESS_KEY_ID: str, SECRET_KEY_ACCESS: str) -> str:
             name = next((t["Value"] for t in vpc.get("Tags", []) if t["Key"] == "Name"), "Unnamed")
             output.append(f"• {name} | ID: {vpc['VpcId']} | CIDR: {vpc['CidrBlock']}")
         return "\n".join(output) if output else "No VPCs found."
-    except Exception as e: return f"❌ Error: {str(e)}"
+    except Exception as e:
+        raise RuntimeError(f"Failed to get VPC details: {e}") from e
 
-@tool("create_vpc", args_schema=CreateVPCInput, return_direct=True)
-def create_vpc(vpc_name: str, cidr_block: str, subnet_cidr: str, AWS_ACCESS_KEY_ID: str, SECRET_KEY_ACCESS: str) -> str:
+@tool("create_vpc", args_schema=CreateVPCInput, return_direct=False)
+def create_vpc(
+    vpc_name: str,
+    cidr_block: str,
+    subnet_cidr: str,
+    region: str,
+    aws_access_key_id: str,
+    aws_secret_access_key: str
+) -> str:
     """Creates a fully configured VPC with Subnet, IGW, Route Table, and Security Group."""
-    ec2 = boto3.client("ec2", aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=SECRET_KEY_ACCESS, region_name="ap-south-1")
+    ec2 = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region
+    )
     try:
         vpc = ec2.create_vpc(CidrBlock=cidr_block, TagSpecifications=[{"ResourceType": "vpc", "Tags": [{"Key": "Name", "Value": vpc_name}]}])
         vpc_id = vpc["Vpc"]["VpcId"]
         ec2.modify_vpc_attribute(VpcId=vpc_id, EnableDnsHostnames={"Value": True})
         
-        subnet = ec2.create_subnet(VpcId=vpc_id, CidrBlock=subnet_cidr, AvailabilityZone="ap-south-1a")
+        subnet = ec2.create_subnet(VpcId=vpc_id, CidrBlock=subnet_cidr)
         subnet_id = subnet["Subnet"]["SubnetId"]
         
         igw_id = create_and_attach_igw(ec2, vpc_id, vpc_name)
@@ -1462,14 +1602,26 @@ def create_vpc(vpc_name: str, cidr_block: str, subnet_cidr: str, AWS_ACCESS_KEY_
         sg_id = create_web_security_group(ec2, vpc_id, vpc_name)
         
         return f"✅ VPC '{vpc_name}' ready!\nID: {vpc_id}\nSubnet: {subnet_id}\nSG: {sg_id}"
-    except Exception as e: return f"❌ Error: {str(e)}"
+    except Exception as e:
+        raise RuntimeError(f"Failed to create VPC: {e}") from e
 
-@tool("delete_vpc", args_schema=DeleteVPCInput, return_direct=True)
-def delete_vpc(vpc_id: str, AWS_ACCESS_KEY_ID: str, SECRET_KEY_ACCESS: str) -> str:
+@tool("delete_vpc", args_schema=DeleteVPCInput, return_direct=False)
+def delete_vpc(
+    vpc_id: str,
+    region: str,
+    aws_access_key_id: str,
+    aws_secret_access_key: str
+) -> str:
     """Deletes a VPC and all its associated resources."""
-    ec2 = boto3.client("ec2", aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=SECRET_KEY_ACCESS, region_name="ap-south-1")
+    ec2 = boto3.client(
+        "ec2",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region
+    )
     try:
         cleanup_vpc_dependencies(ec2, vpc_id)
         ec2.delete_vpc(VpcId=vpc_id)
         return f"🗑️ VPC {vpc_id} deleted."
-    except Exception as e: return f"❌ Error: {str(e)}"
+    except Exception as e:
+        raise RuntimeError(f"Failed to delete VPC: {e}") from e
