@@ -4,16 +4,33 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.blueprint_models import (
+    CostEstimate,
+    DeploymentBlueprint,
+    SecurityReview,
+    SecurityWarning,
+)
 from app.routes import blueprint_routes
 from app.services.blueprint_store import BlueprintStore
 
 
 @pytest.fixture
-def client(monkeypatch) -> TestClient:
+def store(monkeypatch) -> BlueprintStore:
     store = BlueprintStore()
     monkeypatch.delenv("BLUEPRINT_PLANNER_MODE", raising=False)
     monkeypatch.setattr(blueprint_routes, "blueprint_store", store)
+    return store
+
+
+@pytest.fixture
+def client(store: BlueprintStore) -> TestClient:
     return TestClient(app)
+
+
+AWS_HEADERS = {
+    "X-AWS-Access-Key-Id": "AKIATEST",
+    "X-AWS-Secret-Access-Key": "fakesecret",
+}
 
 
 def test_generate_blueprint(client: TestClient) -> None:
@@ -130,3 +147,186 @@ def test_invalid_transition_returns_400(client: TestClient) -> None:
     assert approve_response.status_code == 200
     assert save_response.status_code == 400
     assert save_response.json()["error"] == "Invalid blueprint transition"
+
+
+def test_draft_blueprint_cannot_execute(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy ECS service"},
+    ).json()
+
+    response = client.post(
+        f"/api/v1/blueprints/{created['blueprint_id']}/execute",
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == (
+        "Blueprint must be approved before execution."
+    )
+
+
+def test_saved_blueprint_cannot_execute(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy ECS service"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/save")
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == (
+        "Blueprint must be approved before execution."
+    )
+
+
+def test_approved_blueprint_can_execute(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={
+            "prompt": (
+                "Deploy a production-ready FastAPI app with PostgreSQL, "
+                "S3 storage, and HTTPS."
+            )
+        },
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["deployment_id"].startswith("dep_")
+    assert payload["blueprint_id"] == blueprint_id
+    assert payload["status"] == "deployed"
+    assert "Deployment dry-run completed" in payload["logs"]
+    assert {resource["resource_id"] for resource in payload["planned_resources"]}
+
+
+def test_high_risk_blueprint_blocks_without_override(
+    client: TestClient,
+    store: BlueprintStore,
+) -> None:
+    blueprint = store.add(_high_risk_blueprint())
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint.blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == (
+        "High-risk security warnings require override."
+    )
+    assert store.get(blueprint.blueprint_id).status == "approved"
+
+
+def test_high_risk_blueprint_executes_with_override(
+    client: TestClient,
+    store: BlueprintStore,
+) -> None:
+    blueprint = store.add(_high_risk_blueprint())
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint.blueprint_id}/execute",
+        json={"override_high_risk": True},
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "deployed"
+    assert "High-risk override accepted for dry-run execution" in payload["logs"]
+    assert store.get(blueprint.blueprint_id).status == "deployed"
+
+
+def test_execution_updates_status_and_returns_logs(
+    client: TestClient,
+    store: BlueprintStore,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy Lambda behind API Gateway with CloudWatch"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert store.get(blueprint_id).status == "deployed"
+    assert payload["logs"][:3] == [
+        "Validating blueprint",
+        "Checking approval",
+        "Reviewing security warnings",
+    ]
+    assert "created_at" in payload
+    assert "updated_at" in payload
+
+
+def test_missing_blueprint_execute_returns_404(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/blueprints/bp_missing/execute",
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "Blueprint not found",
+        "detail": "bp_missing",
+    }
+
+
+def _high_risk_blueprint() -> DeploymentBlueprint:
+    return DeploymentBlueprint(
+        blueprint_id="bp_high_risk",
+        name="High Risk Blueprint",
+        status="approved",
+        user_prompt="Deploy a public database",
+        summary="A blueprint with a high-risk security warning.",
+        resources=[
+            {
+                "id": "public-db",
+                "type": "database",
+                "name": "Public PostgreSQL database",
+                "service": "rds",
+                "config": {"publicly_accessible": True},
+                "visibility": "public",
+                "estimated_monthly_cost": 15,
+                "risk_level": "high",
+            }
+        ],
+        connections=[],
+        estimated_cost=CostEstimate(
+            estimated_monthly_total=15,
+            breakdown={"public-db": 15},
+            assumptions=[],
+        ),
+        security_review=SecurityReview(
+            risk_level="high",
+            security_score=70,
+            passed=True,
+            warnings=[
+                SecurityWarning(
+                    severity="high",
+                    message="RDS database is publicly reachable.",
+                    resource_id="public-db",
+                    recommendation="Place RDS in private subnets.",
+                )
+            ],
+            summary="High-risk warning found.",
+        ),
+    )

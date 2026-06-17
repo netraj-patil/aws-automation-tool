@@ -142,3 +142,31 @@ class DeploymentBlueprint(StrictBlueprintModel):
 
 
 DeploymentLog = DeploymentRecord
+
+
+class BlueprintExecutionRequest(StrictBlueprintModel):
+    """Request body for executing an approved deployment blueprint."""
+
+    override_high_risk: bool = False
+
+
+class PlannedResource(StrictBlueprintModel):
+    """A dry-run resource action planned from a blueprint resource."""
+
+    resource_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    service: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    action: str = Field(default="prepare")
+
+
+class BlueprintExecutionResponse(StrictBlueprintModel):
+    """Response returned after a blueprint execution attempt."""
+
+    deployment_id: str = Field(min_length=1)
+    blueprint_id: str = Field(min_length=1)
+    status: DeploymentStatus
+    logs: list[str] = Field(default_factory=list)
+    planned_resources: list[PlannedResource] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)

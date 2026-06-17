@@ -2001,6 +2001,7 @@ pre {
 
 .planner-composer,
 .planner-panel,
+.planner-execution-panel,
 .planner-blueprint__header,
 .planner-prompt-summary,
 .planner-empty,
@@ -2140,6 +2141,15 @@ pre {
   background: transparent;
 }
 
+.planner-button--destructive {
+  color: var(--destructive-foreground);
+  background: var(--destructive);
+}
+
+.planner-button--destructive:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 .planner-button:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
@@ -2227,6 +2237,110 @@ pre {
   margin: 0;
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
+}
+
+.planner-execution-panel {
+  display: grid;
+  overflow: hidden;
+}
+
+.planner-execution-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-4) var(--space-5);
+}
+
+.planner-execution-panel__header h3 {
+  margin: 0;
+  font-size: var(--text-base);
+  letter-spacing: 0;
+}
+
+.planner-execution-panel__eyebrow {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.planner-execution-alert {
+  display: grid;
+  gap: var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--destructive) 42%, var(--border));
+  padding: var(--space-4) var(--space-5);
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--destructive) 12%, var(--card));
+}
+
+.planner-execution-alert strong,
+.planner-execution-alert p {
+  margin: 0;
+}
+
+.planner-execution-alert strong {
+  color: var(--destructive);
+}
+
+.planner-execution-alert p {
+  color: var(--foreground);
+  font-size: var(--text-sm);
+}
+
+.planner-execution-alert .planner-button {
+  justify-self: start;
+}
+
+.planner-execution-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-3) var(--space-5);
+  color: var(--muted-foreground);
+  background: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.planner-execution-meta code {
+  color: var(--foreground);
+}
+
+.planner-execution-log {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  list-style: none;
+}
+
+.planner-execution-log li {
+  position: relative;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 0.42rem var(--space-3) 0.42rem 2rem;
+  color: var(--foreground);
+  background: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.planner-execution-log li::before {
+  position: absolute;
+  top: 0.72rem;
+  left: var(--space-3);
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  background: var(--primary);
+  content: "";
 }
 
 .planner-grid {
@@ -2524,6 +2638,10 @@ pre {
   .planner-composer,
   .planner-blueprint__header,
   .planner-prompt-summary,
+  .planner-execution-panel__header,
+  .planner-execution-alert,
+  .planner-execution-meta,
+  .planner-execution-log,
   .planner-empty,
   .planner-loading,
   .planner-error {
@@ -2547,6 +2665,16 @@ pre {
 
   .planner-actions {
     display: grid;
+    width: 100%;
+  }
+
+  .planner-execution-panel__header,
+  .planner-execution-meta {
+    display: grid;
+    justify-items: start;
+  }
+
+  .planner-execution-alert .planner-button {
     width: 100%;
   }
 

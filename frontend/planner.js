@@ -7,9 +7,12 @@
   const state = {
     prompt: "",
     activeBlueprint: null,
+    deployment: null,
     loading: false,
     actionLoading: "",
     error: "",
+    executionError: "",
+    showHighRiskOverride: false,
   };
 
   const icons = {
@@ -94,6 +97,9 @@
       if (blueprint && typeof blueprint === "object" && blueprint.blueprint_id) {
         state.activeBlueprint = blueprint;
         state.prompt = blueprint.user_prompt || state.prompt;
+        state.deployment = null;
+        state.executionError = "";
+        state.showHighRiskOverride = false;
       }
     } catch {
       localStorage.removeItem(STORAGE_KEY);
@@ -235,8 +241,8 @@
             <button class="planner-button planner-button--primary" type="button" data-planner-action="approve" ${buttonDisabled("approve", blueprint)}>
               ${actionButtonContent("approve", "Approve")}
             </button>
-            <button class="planner-button planner-button--outline" type="button" disabled title="Execution gate not ready">
-              Execute
+            <button class="planner-button planner-button--outline" type="button" data-planner-action="execute" ${buttonDisabled("execute", blueprint)}>
+              ${actionButtonContent("execute", "Execute")}
             </button>
           </div>
         </header>
@@ -245,6 +251,8 @@
           <span>Prompt</span>
           <p>${escapeHtml(blueprint.user_prompt)}</p>
         </section>
+
+        ${deploymentStatusPanel(blueprint)}
 
         <div class="planner-grid">
           ${diagramPanel(blueprint)}
@@ -262,6 +270,7 @@
     if (loading) return "disabled aria-busy=\"true\"";
     if (action === "save" && status !== "draft") return "disabled";
     if (action === "approve" && !["draft", "saved"].includes(status)) return "disabled";
+    if (action === "execute" && status !== "approved") return "disabled";
     if (state.actionLoading) return "disabled";
     return "";
   }
@@ -270,7 +279,63 @@
     if (state.actionLoading !== action) {
       return escapeHtml(label);
     }
-    return `${global.Components.spinner()}<span>${escapeHtml(action === "save" ? "Saving" : "Approving")}</span>`;
+    const loadingLabels = {
+      save: "Saving",
+      approve: "Approving",
+      execute: "Executing",
+      "execute-override": "Executing",
+    };
+    return `${global.Components.spinner()}<span>${escapeHtml(loadingLabels[action] || "Working")}</span>`;
+  }
+
+  function deploymentStatusPanel(blueprint) {
+    const deployment = state.deployment;
+    const executing = ["execute", "execute-override"].includes(state.actionLoading);
+    const hasError = Boolean(state.executionError);
+    if (!deployment && !executing && !hasError) return "";
+
+    const status = deployment?.status || (executing ? "deploying" : "failed");
+    const logs = Array.isArray(deployment?.logs) ? deployment.logs : [];
+    const plannedResources = Array.isArray(deployment?.planned_resources)
+      ? deployment.planned_resources
+      : [];
+    const showOverride = state.showHighRiskOverride
+      && (blueprint.status || "draft") === "approved";
+
+    return `
+      <section class="planner-execution-panel" aria-live="polite">
+        <header class="planner-execution-panel__header">
+          <div>
+            <span class="planner-execution-panel__eyebrow">Deployment dry-run</span>
+            <h3>Execution Status</h3>
+          </div>
+          ${badge(titleCase(status), statusTone(status))}
+        </header>
+
+        ${hasError ? `
+          <div class="planner-execution-alert" role="alert">
+            <strong>Execution blocked</strong>
+            <p>${escapeHtml(state.executionError)}</p>
+            ${showOverride ? `
+              <button class="planner-button planner-button--destructive" type="button" data-planner-action="execute-override" ${state.actionLoading ? "disabled" : ""}>
+                ${actionButtonContent("execute-override", "Override high risk and execute dry-run")}
+              </button>
+            ` : ""}
+          </div>
+        ` : ""}
+
+        <div class="planner-execution-meta">
+          ${deployment?.deployment_id ? `<code>${escapeHtml(deployment.deployment_id)}</code>` : "<span>Preparing execution gate</span>"}
+          ${plannedResources.length ? `<span>${plannedResources.length} planned resources</span>` : ""}
+        </div>
+
+        <ol class="planner-execution-log">
+          ${logs.length ? logs.map((log) => `<li>${escapeHtml(log)}</li>`).join("") : `
+            <li>${executing ? "Starting blueprint execution dry-run" : "No deployment logs yet"}</li>
+          `}
+        </ol>
+      </section>
+    `;
   }
 
   function panelHeader(icon, title, meta = "") {
@@ -411,7 +476,10 @@
     try {
       const blueprint = await global.api.request("POST", "/blueprints/generate", { prompt });
       state.activeBlueprint = blueprint;
+      state.deployment = null;
       state.prompt = blueprint.user_prompt || prompt;
+      state.executionError = "";
+      state.showHighRiskOverride = false;
       persistBlueprint(blueprint);
       global.Components.toast("Blueprint generated.", "success");
     } catch (error) {
@@ -431,10 +499,51 @@
     try {
       const blueprint = await global.api.request("POST", `/blueprints/${encodeURIComponent(blueprintId)}/${action}`);
       state.activeBlueprint = blueprint;
+      state.executionError = "";
+      state.showHighRiskOverride = false;
       persistBlueprint(blueprint);
       global.Components.toast(action === "save" ? "Plan saved." : "Blueprint approved.", "success");
     } catch (error) {
       global.Components.toast(error.message || "Unable to update blueprint.", "danger");
+    } finally {
+      state.actionLoading = "";
+      renderPlannerBody();
+    }
+  }
+
+  async function executeBlueprint(overrideHighRisk = false) {
+    const blueprintId = state.activeBlueprint?.blueprint_id;
+    if (!blueprintId || state.actionLoading) return;
+
+    const action = overrideHighRisk ? "execute-override" : "execute";
+    state.actionLoading = action;
+    state.executionError = "";
+    if (!overrideHighRisk) {
+      state.showHighRiskOverride = false;
+    }
+    renderPlannerBody();
+
+    try {
+      const deployment = await global.api.request(
+        "POST",
+        `/blueprints/${encodeURIComponent(blueprintId)}/execute`,
+        overrideHighRisk ? { override_high_risk: true } : {},
+      );
+      state.deployment = deployment;
+      state.showHighRiskOverride = false;
+      state.activeBlueprint = {
+        ...state.activeBlueprint,
+        status: deployment.status || state.activeBlueprint.status,
+        updated_at: deployment.updated_at || state.activeBlueprint.updated_at,
+      };
+      persistBlueprint(state.activeBlueprint);
+      global.Components.toast("Deployment dry-run completed.", "success");
+    } catch (error) {
+      const message = error.message || "Unable to execute blueprint.";
+      const detail = JSON.stringify(error.data || {});
+      state.executionError = message;
+      state.showHighRiskOverride = /high-risk|override_high_risk/i.test(`${message} ${detail}`);
+      global.Components.toast(message, "danger");
     } finally {
       state.actionLoading = "";
       renderPlannerBody();
@@ -464,7 +573,14 @@
 
     const actionButton = event.target.closest("[data-planner-action]");
     if (actionButton) {
-      updateBlueprint(actionButton.dataset.plannerAction);
+      const action = actionButton.dataset.plannerAction;
+      if (action === "execute") {
+        executeBlueprint(false);
+      } else if (action === "execute-override") {
+        executeBlueprint(true);
+      } else {
+        updateBlueprint(action);
+      }
     }
   });
 

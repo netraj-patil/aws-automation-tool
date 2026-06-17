@@ -87,6 +87,42 @@ class BlueprintStore:
         blueprint.updated_at = self._utc_now()
         return self._copy_blueprint(blueprint)
 
+    def mark_deploying(self, blueprint_id: str) -> DeploymentBlueprint:
+        """Move an approved blueprint into the deploying state."""
+        blueprint = self._get_mutable(blueprint_id)
+        if blueprint.status != "approved":
+            raise InvalidBlueprintTransitionError(
+                f"Cannot deploy blueprint from status '{blueprint.status}'"
+            )
+
+        blueprint.status = "deploying"
+        blueprint.updated_at = self._utc_now()
+        return self._copy_blueprint(blueprint)
+
+    def mark_deployed(self, blueprint_id: str) -> DeploymentBlueprint:
+        """Move a deploying blueprint into the deployed state."""
+        blueprint = self._get_mutable(blueprint_id)
+        if blueprint.status != "deploying":
+            raise InvalidBlueprintTransitionError(
+                f"Cannot complete blueprint from status '{blueprint.status}'"
+            )
+
+        blueprint.status = "deployed"
+        blueprint.updated_at = self._utc_now()
+        return self._copy_blueprint(blueprint)
+
+    def mark_failed(self, blueprint_id: str) -> DeploymentBlueprint:
+        """Move a deploying blueprint into the failed state."""
+        blueprint = self._get_mutable(blueprint_id)
+        if blueprint.status != "deploying":
+            raise InvalidBlueprintTransitionError(
+                f"Cannot fail blueprint from status '{blueprint.status}'"
+            )
+
+        blueprint.status = "failed"
+        blueprint.updated_at = self._utc_now()
+        return self._copy_blueprint(blueprint)
+
     def clear_all(self) -> None:
         """Delete all blueprints in this store; intended for tests only."""
         self._blueprints.clear()
