@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field
 from app.models.agent_models import ErrorResponse
 from app.models.blueprint_models import (
     BlueprintExecutionRequest,
-    BlueprintExecutionResponse,
     DeploymentBlueprint,
 )
+from app.models.deployment_models import DeploymentRecord
+from app.services.aws_credentials import credentials_from_headers
 from app.services.blueprint_executor import (
     BlueprintValidationError,
     MissingAwsCredentialsError,
@@ -19,6 +20,7 @@ from app.services.blueprint_store import (
     InvalidBlueprintTransitionError,
     blueprint_store,
 )
+from app.services.deployment_store import deployment_store
 from app.services.blueprint_planner import blueprint_planner
 from app.services.cost_service import cost_service
 from app.services.security_service import security_service
@@ -55,14 +57,8 @@ def _invalid_transition(exc: InvalidBlueprintTransitionError) -> HTTPException:
 
 
 def _credentials(request: Request) -> dict[str, str | None]:
-    """Read the active browser profile, falling back to boto3's chain."""
-    return {
-        "aws_access_key_id": request.headers.get("X-AWS-Access-Key-Id"),
-        "aws_secret_access_key": request.headers.get(
-            "X-AWS-Secret-Access-Key"
-        ),
-        "aws_session_token": request.headers.get("X-AWS-Session-Token"),
-    }
+    """Read the active browser profile without using server env credentials."""
+    return credentials_from_headers(request)
 
 
 @router.post(
@@ -131,7 +127,7 @@ def approve_blueprint(blueprint_id: str) -> DeploymentBlueprint:
 
 @router.post(
     "/{blueprint_id}/execute",
-    response_model=BlueprintExecutionResponse,
+    response_model=DeploymentRecord,
     responses={
         400: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
@@ -142,7 +138,7 @@ def execute_blueprint(
     blueprint_id: str,
     http_request: Request,
     execute_request: BlueprintExecutionRequest | None = None,
-) -> BlueprintExecutionResponse:
+) -> DeploymentRecord:
     """Execute an approved blueprint using the dry-run executor."""
     request = execute_request or BlueprintExecutionRequest()
     try:
@@ -192,22 +188,54 @@ def execute_blueprint(
             detail={"error": "AWS credentials required", "detail": str(exc)},
         ) from exc
 
+    deployment: DeploymentRecord | None = None
     try:
         blueprint_store.mark_deploying(blueprint.blueprint_id)
+        deployment = deployment_store.create(
+            blueprint.blueprint_id,
+            planned_resources=blueprint_executor.planned_resources(blueprint),
+        )
         result = blueprint_executor.dry_run(
             blueprint,
             override_high_risk=request.override_high_risk,
         )
+        for log in result.logs:
+            deployment = deployment_store.append_log(
+                deployment.deployment_id,
+                log,
+            )
         deployed = blueprint_store.mark_deployed(blueprint.blueprint_id)
-        result.status = "deployed"
-        result.updated_at = deployed.updated_at
-        return result
+        deployment = deployment_store.complete(
+            deployment.deployment_id,
+            planned_resources=result.planned_resources,
+        )
+        deployment.updated_at = max(deployment.updated_at, deployed.updated_at)
+        return deployment
     except Exception as exc:
         try:
             blueprint_store.mark_failed(blueprint.blueprint_id)
         except Exception:
             pass
+        if deployment is not None:
+            try:
+                deployment_store.fail(deployment.deployment_id, str(exc))
+            except Exception:
+                pass
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "Blueprint execution failed", "detail": str(exc)},
         ) from exc
+
+
+@router.get(
+    "/{blueprint_id}/deployments",
+    response_model=list[DeploymentRecord],
+    responses={404: {"model": ErrorResponse}},
+)
+def list_blueprint_deployments(blueprint_id: str) -> list[DeploymentRecord]:
+    """Return deployment records for the requested blueprint."""
+    try:
+        blueprint_store.get(blueprint_id)
+    except BlueprintNotFoundError as exc:
+        raise _not_found(exc) from exc
+    return deployment_store.list_for_blueprint(blueprint_id)

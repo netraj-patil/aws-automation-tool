@@ -8,11 +8,15 @@
     prompt: "",
     activeBlueprint: null,
     deployment: null,
+    deploymentHistory: [],
+    deploymentHistoryLoading: false,
     loading: false,
     actionLoading: "",
     error: "",
     executionError: "",
     showHighRiskOverride: false,
+    diagramScale: 1,
+    selectedDiagramNode: "",
   };
 
   const icons = {
@@ -98,6 +102,7 @@
         state.activeBlueprint = blueprint;
         state.prompt = blueprint.user_prompt || state.prompt;
         state.deployment = null;
+        state.deploymentHistory = [];
         state.executionError = "";
         state.showHighRiskOverride = false;
       }
@@ -143,6 +148,7 @@
       loadStoredBlueprint();
     }
     renderPlannerBody();
+    loadDeploymentHistory();
   }
 
   function setGenerateLoading(isLoading) {
@@ -185,6 +191,7 @@
     }
 
     result.innerHTML = blueprintState(state.activeBlueprint);
+    renderArchitectureDiagram(state.activeBlueprint);
   }
 
   function emptyState() {
@@ -289,16 +296,21 @@
   }
 
   function deploymentStatusPanel(blueprint) {
-    const deployment = state.deployment;
+    const deployment = state.deployment || state.deploymentHistory[0] || null;
     const executing = ["execute", "execute-override"].includes(state.actionLoading);
     const hasError = Boolean(state.executionError);
-    if (!deployment && !executing && !hasError) return "";
+    if (!deployment && !executing && !hasError && !state.deploymentHistoryLoading) return "";
 
     const status = deployment?.status || (executing ? "deploying" : "failed");
     const logs = Array.isArray(deployment?.logs) ? deployment.logs : [];
     const plannedResources = Array.isArray(deployment?.planned_resources)
       ? deployment.planned_resources
       : [];
+    const awsResources = Array.isArray(deployment?.aws_resources)
+      ? deployment.aws_resources
+      : [];
+    const resources = plannedResources.length ? plannedResources : awsResources;
+    const errorMessage = deployment?.error || state.executionError;
     const showOverride = state.showHighRiskOverride
       && (blueprint.status || "draft") === "approved";
 
@@ -306,19 +318,26 @@
       <section class="planner-execution-panel" aria-live="polite">
         <header class="planner-execution-panel__header">
           <div>
-            <span class="planner-execution-panel__eyebrow">Deployment dry-run</span>
-            <h3>Execution Status</h3>
+            <span class="planner-execution-panel__eyebrow">Latest deployment</span>
+            <h3>Status History</h3>
           </div>
           ${badge(titleCase(status), statusTone(status))}
         </header>
 
-        ${hasError ? `
+        ${state.deploymentHistoryLoading ? `
+          <div class="planner-execution-loading">
+            ${global.Components.spinner()}
+            <span>Loading deployment history</span>
+          </div>
+        ` : ""}
+
+        ${errorMessage ? `
           <div class="planner-execution-alert" role="alert">
-            <strong>Execution blocked</strong>
-            <p>${escapeHtml(state.executionError)}</p>
+            <strong>${status === "failed" ? "Deployment failed" : "Execution blocked"}</strong>
+            <p>${escapeHtml(errorMessage)}</p>
             ${showOverride ? `
               <button class="planner-button planner-button--destructive" type="button" data-planner-action="execute-override" ${state.actionLoading ? "disabled" : ""}>
-                ${actionButtonContent("execute-override", "Override high risk and execute dry-run")}
+                ${actionButtonContent("execute-override", "Override high risk and execute")}
               </button>
             ` : ""}
           </div>
@@ -326,16 +345,75 @@
 
         <div class="planner-execution-meta">
           ${deployment?.deployment_id ? `<code>${escapeHtml(deployment.deployment_id)}</code>` : "<span>Preparing execution gate</span>"}
-          ${plannedResources.length ? `<span>${plannedResources.length} planned resources</span>` : ""}
+          ${resources.length ? `<span>${resources.length} resources</span>` : ""}
+          ${deployment?.updated_at ? `<span>Updated ${escapeHtml(formatDateTime(deployment.updated_at))}</span>` : ""}
         </div>
 
-        <ol class="planner-execution-log">
-          ${logs.length ? logs.map((log) => `<li>${escapeHtml(log)}</li>`).join("") : `
-            <li>${executing ? "Starting blueprint execution dry-run" : "No deployment logs yet"}</li>
-          `}
-        </ol>
+        <div class="planner-deployment-layout">
+          <div>
+            <h4>Logs</h4>
+            <ol class="planner-execution-log">
+              ${logs.length ? logs.map((log) => `<li>${escapeHtml(log)}</li>`).join("") : `
+                <li>${executing ? "Starting blueprint execution" : "No deployment logs yet"}</li>
+              `}
+            </ol>
+          </div>
+
+          <div>
+            <h4>Resources</h4>
+            ${resources.length ? `
+              <ul class="planner-deployment-resources">
+                ${resources.map((resource) => `
+                  <li>
+                    <strong>${escapeHtml(resource.name || resource.resource_id || resource.id || "AWS resource")}</strong>
+                    <span>${escapeHtml([resource.service, resource.type, resource.action].filter(Boolean).join(" / ") || "planned")}</span>
+                  </li>
+                `).join("")}
+              </ul>
+            ` : '<p class="planner-muted planner-deployment-empty">No resources recorded yet.</p>'}
+          </div>
+        </div>
+
+        ${deploymentHistoryList()}
       </section>
     `;
+  }
+
+  function deploymentHistoryList() {
+    const history = Array.isArray(state.deploymentHistory) ? state.deploymentHistory : [];
+    if (!history.length) return "";
+
+    return `
+      <div class="planner-deployment-history">
+        <header>
+          <h4>Deployment History</h4>
+          <span>${history.length} ${history.length === 1 ? "record" : "records"}</span>
+        </header>
+        <ul>
+          ${history.map((deployment) => `
+            <li>
+              <div>
+                ${badge(titleCase(deployment.status), statusTone(deployment.status), "planner-badge--compact")}
+                <code>${escapeHtml(deployment.deployment_id)}</code>
+              </div>
+              <span>${escapeHtml(formatDateTime(deployment.updated_at || deployment.created_at))}</span>
+            </li>
+          `).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
   }
 
   function panelHeader(icon, title, meta = "") {
@@ -349,12 +427,259 @@
   }
 
   function diagramPanel(blueprint) {
-    const diagram = blueprint.diagram_mermaid || "graph TD\n  plan[Deployment blueprint]\n  review[Security review]\n  plan --> review";
+    const diagram = blueprint.diagram_mermaid || "";
     return `
       <section class="planner-panel planner-panel--diagram">
-        ${panelHeader(icons.diagram, "Architecture Diagram", badge("Mermaid", "primary"))}
-        <pre class="planner-diagram" aria-label="Mermaid architecture diagram"><code>${escapeHtml(diagram)}</code></pre>
+        ${panelHeader(icons.diagram, "Architecture Diagram", badge("Interactive Mermaid", "primary"))}
+        <div class="planner-diagram-toolbar" aria-label="Diagram controls">
+          <button class="planner-diagram-tool" type="button" data-diagram-zoom="out" aria-label="Zoom out">-</button>
+          <button class="planner-diagram-tool" type="button" data-diagram-zoom="reset" aria-label="Reset zoom">100%</button>
+          <button class="planner-diagram-tool" type="button" data-diagram-zoom="in" aria-label="Zoom in">+</button>
+        </div>
+        <div class="planner-diagram" data-planner-diagram data-diagram-source="${escapeHtml(diagram)}" aria-label="Architecture diagram">
+          <div class="planner-diagram__loading">${global.Components.spinner()}<span>Rendering diagram</span></div>
+        </div>
+        <div class="planner-diagram-detail" data-diagram-detail>
+          <span>Resource details</span>
+          <p>No resource selected</p>
+        </div>
+        <details class="planner-diagram-source">
+          <summary>Raw diagram_mermaid</summary>
+          <pre><code>${escapeHtml(diagram || "No diagram_mermaid returned.")}</code></pre>
+        </details>
       </section>
+    `;
+  }
+
+  function renderArchitectureDiagram(blueprint) {
+    const container = document.querySelector("[data-planner-diagram]");
+    if (!container) return;
+
+    const diagramMermaid = container.dataset.diagramSource || "";
+    const parsed = parseMermaidDiagram(diagramMermaid);
+    console.log("[Diagram Debug] raw diagram_mermaid:", diagramMermaid);
+    console.log("[Diagram Debug] parsed nodes:", parsed.nodes);
+    console.log("[Diagram Debug] parsed edges:", parsed.edges);
+    if (!parsed.nodes.length) {
+      showDiagramError(
+        container,
+        diagramMermaid
+          ? "Could not parse diagram_mermaid. Check the generated diagram format."
+          : "No diagram_mermaid was returned for this blueprint.",
+      );
+      updateDiagramDetail(null, blueprint);
+      return;
+    }
+
+    const resourceLookup = diagramResourceLookup(blueprint);
+    const diagram = layoutDiagram(parsed, resourceLookup);
+    const selected = state.selectedDiagramNode && parsed.nodes.some((node) => node.id === state.selectedDiagramNode)
+      ? state.selectedDiagramNode
+      : parsed.nodes[0]?.id;
+    state.selectedDiagramNode = selected || "";
+
+    container.innerHTML = diagramSvg(diagram, selected);
+    updateDiagramDetail(resourceLookup.get(selected) || parsed.nodes.find((node) => node.id === selected), blueprint);
+  }
+
+  function showDiagramError(container, message) {
+    container.innerHTML = `
+      <div class="planner-diagram-error" role="alert">
+        <strong>Diagram unavailable</strong>
+        <p>${escapeHtml(message)}</p>
+      </div>
+    `;
+  }
+
+  function parseMermaidDiagram(source) {
+    const nodes = new Map();
+    const edges = [];
+    const nodePattern = /^\s*([A-Za-z0-9_]+)\s*(?:\[\("([^"]+)"\)\]|\["([^"]+)"\]|\[([^\]]+)\])/;
+    const edgePattern = /^\s*([A-Za-z0-9_]+)\s*-->\s*([A-Za-z0-9_]+)/;
+
+    source.split(/\r?\n/).forEach((line) => {
+      const edge = line.match(edgePattern);
+      if (edge) {
+        const [, from, to] = edge;
+        edges.push({ from, to });
+        if (!nodes.has(from)) nodes.set(from, { id: from, label: from });
+        if (!nodes.has(to)) nodes.set(to, { id: to, label: to });
+        return;
+      }
+
+      const node = line.match(nodePattern);
+      if (node) {
+        const [, id, databaseLabel, quotedLabel, plainLabel] = node;
+        nodes.set(id, {
+          id,
+          label: databaseLabel || quotedLabel || plainLabel || id,
+          shape: databaseLabel ? "database" : "box",
+        });
+      }
+    });
+
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  function diagramResourceLookup(blueprint) {
+    const resources = Array.isArray(blueprint.resources) ? blueprint.resources : [];
+    return new Map(resources.map((resource) => [mermaidNodeId(resource.id), resource]));
+  }
+
+  function mermaidNodeId(value) {
+    const normalized = String(value || "")
+      .replace(/[^0-9A-Za-z_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+    return `node_${normalized || "resource"}`;
+  }
+
+  function layoutDiagram(parsed, resourceLookup) {
+    const outgoing = new Map(parsed.nodes.map((node) => [node.id, []]));
+    const incoming = new Map(parsed.nodes.map((node) => [node.id, []]));
+    parsed.edges.forEach((edge) => {
+      outgoing.get(edge.from)?.push(edge.to);
+      incoming.get(edge.to)?.push(edge.from);
+    });
+
+    const levels = new Map();
+    const roots = parsed.nodes.filter((node) => !(incoming.get(node.id) || []).length);
+    const queue = (roots.length ? roots : parsed.nodes.slice(0, 1)).map((node) => {
+      levels.set(node.id, 0);
+      return node.id;
+    });
+
+    while (queue.length) {
+      const id = queue.shift();
+      const nextLevel = (levels.get(id) || 0) + 1;
+      (outgoing.get(id) || []).forEach((target) => {
+        if (!levels.has(target) || nextLevel > levels.get(target)) {
+          levels.set(target, nextLevel);
+          queue.push(target);
+        }
+      });
+    }
+
+    parsed.nodes.forEach((node) => {
+      if (!levels.has(node.id)) levels.set(node.id, 0);
+    });
+
+    const grouped = new Map();
+    parsed.nodes.forEach((node) => {
+      const level = levels.get(node.id) || 0;
+      grouped.set(level, [...(grouped.get(level) || []), node]);
+    });
+
+    const columnWidth = 238;
+    const rowHeight = 112;
+    const nodeWidth = 176;
+    const nodeHeight = 58;
+    const padding = 54;
+    const maxRows = Math.max(...[...grouped.values()].map((items) => items.length), 1);
+    const maxLevel = Math.max(...[...levels.values()], 0);
+    const width = Math.max(720, padding * 2 + maxLevel * columnWidth + nodeWidth);
+    const height = Math.max(300, padding * 2 + (maxRows - 1) * rowHeight + nodeHeight);
+    const nodes = [];
+
+    [...grouped.entries()].sort(([left], [right]) => left - right).forEach(([level, items]) => {
+      const columnHeight = (items.length - 1) * rowHeight;
+      const startY = (height - columnHeight - nodeHeight) / 2;
+      items.forEach((node, index) => {
+        const resource = resourceLookup.get(node.id) || {};
+        nodes.push({
+          ...node,
+          x: padding + level * columnWidth,
+          y: startY + index * rowHeight,
+          width: nodeWidth,
+          height: nodeHeight,
+          service: resource.service || "",
+          risk_level: resource.risk_level || "",
+          visibility: resource.visibility || "",
+        });
+      });
+    });
+
+    const positioned = new Map(nodes.map((node) => [node.id, node]));
+    return {
+      width,
+      height,
+      nodes,
+      edges: parsed.edges.filter((edge) => positioned.has(edge.from) && positioned.has(edge.to)),
+      positioned,
+    };
+  }
+
+  function diagramSvg(diagram, selectedId) {
+    const scale = state.diagramScale;
+    const edges = diagram.edges.map((edge) => {
+      const from = diagram.positioned.get(edge.from);
+      const to = diagram.positioned.get(edge.to);
+      const x1 = from.x + from.width;
+      const y1 = from.y + from.height / 2;
+      const x2 = to.x;
+      const y2 = to.y + to.height / 2;
+      const mid = Math.max(24, (x2 - x1) / 2);
+      return `<path class="planner-diagram-edge${edge.from === selectedId || edge.to === selectedId ? " active" : ""}" d="M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}" marker-end="url(#planner-diagram-arrow)" />`;
+    }).join("");
+
+    const nodes = diagram.nodes.map((node) => {
+      const selected = node.id === selectedId;
+      const service = node.service ? `<text x="${node.x + 14}" y="${node.y + 43}" class="planner-diagram-node__meta">${escapeHtml(node.service)}</text>` : "";
+      return `<g class="planner-diagram-node${selected ? " active" : ""} planner-diagram-node--${safeClassName(node.service || "resource")}"
+          data-diagram-node="${escapeHtml(node.id)}" tabindex="0" role="button" aria-label="${escapeHtml(node.label)}">
+        <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="8" />
+        <text x="${node.x + 14}" y="${node.y + 25}" class="planner-diagram-node__label">${escapeHtml(truncateLabel(node.label, 25))}</text>
+        ${service}
+      </g>`;
+    }).join("");
+
+    return `<div class="planner-diagram__canvas" style="width:${diagram.width * scale}px;height:${diagram.height * scale}px">
+      <svg viewBox="0 0 ${diagram.width} ${diagram.height}" style="width:${diagram.width * scale}px;height:${diagram.height * scale}px" role="img" aria-label="Rendered architecture diagram">
+        <defs>
+          <marker id="planner-diagram-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" />
+          </marker>
+        </defs>
+        ${edges}
+        ${nodes}
+      </svg>
+    </div>`;
+  }
+
+  function truncateLabel(value, limit) {
+    const text = String(value || "");
+    return text.length > limit ? `${text.slice(0, limit - 1)}...` : text;
+  }
+
+  function safeClassName(value) {
+    return String(value || "resource").replace(/[^a-zA-Z0-9_-]+/g, "-").toLowerCase();
+  }
+
+  function updateDiagramDetail(item, blueprint) {
+    const detail = document.querySelector("[data-diagram-detail]");
+    if (!detail) return;
+    if (!item) {
+      detail.innerHTML = "<span>Resource details</span><p>No resource selected</p>";
+      return;
+    }
+
+    const resources = Array.isArray(blueprint.resources) ? blueprint.resources : [];
+    const resource = item.id && item.label && !item.service
+      ? resources.find((candidate) => mermaidNodeId(candidate.id) === item.id) || item
+      : item;
+    const monthly = resource.estimated_monthly_cost === undefined
+      ? ""
+      : `<dd>${escapeHtml(currencyFormatter(blueprint.estimated_cost?.currency).format(Number(resource.estimated_monthly_cost || 0)))}</dd>`;
+    detail.innerHTML = `
+      <span>Resource details</span>
+      <strong>${escapeHtml(resource.name || resource.label || "Architecture node")}</strong>
+      <dl>
+        <div><dt>Service</dt><dd>${escapeHtml(resource.service || "-")}</dd></div>
+        <div><dt>Type</dt><dd>${escapeHtml(resource.type || resource.shape || "-")}</dd></div>
+        <div><dt>Visibility</dt><dd>${escapeHtml(titleCase(resource.visibility || "-"))}</dd></div>
+        <div><dt>Risk</dt><dd>${escapeHtml(titleCase(resource.risk_level || "-"))}</dd></div>
+        ${monthly ? `<div><dt>Monthly</dt>${monthly}</div>` : ""}
+      </dl>
     `;
   }
 
@@ -477,6 +802,9 @@
       const blueprint = await global.api.request("POST", "/blueprints/generate", { prompt });
       state.activeBlueprint = blueprint;
       state.deployment = null;
+      state.deploymentHistory = [];
+      state.selectedDiagramNode = "";
+      state.diagramScale = 1;
       state.prompt = blueprint.user_prompt || prompt;
       state.executionError = "";
       state.showHighRiskOverride = false;
@@ -502,6 +830,7 @@
       state.executionError = "";
       state.showHighRiskOverride = false;
       persistBlueprint(blueprint);
+      loadDeploymentHistory();
       global.Components.toast(action === "save" ? "Plan saved." : "Blueprint approved.", "success");
     } catch (error) {
       global.Components.toast(error.message || "Unable to update blueprint.", "danger");
@@ -530,6 +859,10 @@
         overrideHighRisk ? { override_high_risk: true } : {},
       );
       state.deployment = deployment;
+      state.deploymentHistory = [
+        deployment,
+        ...state.deploymentHistory.filter((item) => item.deployment_id !== deployment.deployment_id),
+      ];
       state.showHighRiskOverride = false;
       state.activeBlueprint = {
         ...state.activeBlueprint,
@@ -543,9 +876,46 @@
       const detail = JSON.stringify(error.data || {});
       state.executionError = message;
       state.showHighRiskOverride = /high-risk|override_high_risk/i.test(`${message} ${detail}`);
+      await loadDeploymentHistory({ silent: true });
       global.Components.toast(message, "danger");
     } finally {
       state.actionLoading = "";
+      renderPlannerBody();
+    }
+  }
+
+  async function loadDeploymentHistory(options = {}) {
+    const blueprintId = state.activeBlueprint?.blueprint_id;
+    if (!blueprintId || state.deploymentHistoryLoading) return;
+
+    state.deploymentHistoryLoading = true;
+    if (!options.silent) {
+      renderPlannerBody();
+    }
+
+    try {
+      const history = await global.api.request(
+        "GET",
+        `/blueprints/${encodeURIComponent(blueprintId)}/deployments`,
+      );
+      if (state.activeBlueprint?.blueprint_id !== blueprintId) return;
+
+      state.deploymentHistory = Array.isArray(history) ? history : [];
+      state.deployment = state.deploymentHistory[0] || state.deployment;
+      if (state.deployment) {
+        state.activeBlueprint = {
+          ...state.activeBlueprint,
+          status: state.deployment.status || state.activeBlueprint.status,
+          updated_at: state.deployment.updated_at || state.activeBlueprint.updated_at,
+        };
+        persistBlueprint(state.activeBlueprint);
+      }
+    } catch (error) {
+      if (!options.silent) {
+        global.Components.toast(error.message || "Unable to load deployment history.", "danger");
+      }
+    } finally {
+      state.deploymentHistoryLoading = false;
       renderPlannerBody();
     }
   }
@@ -565,6 +935,23 @@
   document.addEventListener("click", (event) => {
     if (!isMounted()) return;
 
+    const zoomButton = event.target.closest("[data-diagram-zoom]");
+    if (zoomButton) {
+      const action = zoomButton.dataset.diagramZoom;
+      if (action === "in") state.diagramScale = Math.min(1.55, state.diagramScale + 0.15);
+      if (action === "out") state.diagramScale = Math.max(0.7, state.diagramScale - 0.15);
+      if (action === "reset") state.diagramScale = 1;
+      renderArchitectureDiagram(state.activeBlueprint || {});
+      return;
+    }
+
+    const diagramNode = event.target.closest("[data-diagram-node]");
+    if (diagramNode) {
+      state.selectedDiagramNode = diagramNode.dataset.diagramNode;
+      renderArchitectureDiagram(state.activeBlueprint || {});
+      return;
+    }
+
     if (event.target.closest("[data-planner-retry]")) {
       const form = document.getElementById("planner-generate-form");
       if (form) handleGenerate(form);
@@ -582,6 +969,15 @@
         updateBlueprint(action);
       }
     }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!isMounted()) return;
+    const diagramNode = event.target.closest("[data-diagram-node]");
+    if (!diagramNode || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    state.selectedDiagramNode = diagramNode.dataset.diagramNode;
+    renderArchitectureDiagram(state.activeBlueprint || {});
   });
 
   global.Planner = { render, mount };

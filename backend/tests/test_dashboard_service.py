@@ -133,3 +133,45 @@ def test_summary_keeps_other_metrics_when_permission_is_missing(
     assert summary["iam"]["total"] is None
     assert summary["s3"]["total"] == 0
     assert summary["permission_warnings"] == ["IAM users"]
+
+
+def test_dashboard_uses_demo_data_when_credentials_are_invalid(monkeypatch) -> None:
+    invalid_credentials = ClientError(
+        {
+            "Error": {
+                "Code": "InvalidClientTokenId",
+                "Message": "The security token included in the request is invalid.",
+            }
+        },
+        "DescribeInstances",
+    )
+
+    def raise_invalid_credentials(*args, **kwargs):
+        raise invalid_credentials
+
+    service = DashboardService()
+    monkeypatch.setattr(service, "_session", lambda credentials: object())
+    for method_name in [
+        "_ec2_resources",
+        "_lambda_resources",
+        "_s3_resources",
+        "_rds_resources",
+        "_ecs_resources",
+        "_cloudformation_resources",
+        "_tagged_resources",
+        "_broken_cloudwatch",
+        "_broken_cloudformation",
+        "_broken_ec2_status",
+        "_broken_ecs",
+        "_broken_lambda",
+        "_collect_costs",
+    ]:
+        monkeypatch.setattr(service, method_name, raise_invalid_credentials)
+
+    dashboard = service.get_dashboard("us-east-1", {"aws_access_key_id": "bad"})
+
+    assert dashboard["mode"] == "demo"
+    assert dashboard["banner"] == (
+        "Showing default demo data. Add AWS credentials to monitor your real AWS account."
+    )
+    assert dashboard["summary"]["total_resources"] > 0

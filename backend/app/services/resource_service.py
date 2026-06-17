@@ -9,19 +9,27 @@ from typing import Any
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.services.aws_credentials import explicit_session_kwargs
+
 
 class ResourceService:
     """Collect searchable resources, EC2 instances, and S3 inventory."""
 
     def _session(self, credentials: dict[str, str | None]) -> boto3.Session:
-        return boto3.Session(
-            **{key: value for key, value in credentials.items() if value}
-        )
+        return boto3.Session(**explicit_session_kwargs(credentials))
 
     @staticmethod
     def _name_from_arn(arn: str) -> str:
         resource = arn.split(":", 5)[-1]
         return resource.rsplit("/", 1)[-1].rsplit(":", 1)[-1] or arn
+
+    @staticmethod
+    def _isoformat(value: Any) -> str | None:
+        if not value:
+            return None
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return str(value)
 
     @staticmethod
     def _resource_tags(properties: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -56,31 +64,43 @@ class ResourceService:
         client = session.client("resource-explorer-2", region_name=region)
         resources: list[dict[str, Any]] = []
         next_token: str | None = None
+        count: dict[str, Any] = {}
+        view_arn = ""
 
         while True:
             params: dict[str, Any] = {
                 "QueryString": query,
-                "MaxResults": 100,
+                "MaxResults": 1000,
             }
             if next_token:
                 params["NextToken"] = next_token
             response = client.search(**params)
+            count = response.get("Count", count)
+            view_arn = response.get("ViewArn", view_arn)
             for item in response.get("Resources", []):
                 arn = item.get("Arn", "")
                 tags = self._resource_tags(item.get("Properties", []))
+                identifier = self._name_from_arn(arn)
                 name = next(
                     (
                         tag["value"]
                         for tag in tags
                         if tag["key"].lower() == "name" and tag["value"]
                     ),
-                    self._name_from_arn(arn),
+                    identifier,
                 )
                 resources.append(
                     {
+                        "identifier": identifier,
                         "name": name,
+                        "resource_type": item.get("ResourceType", ""),
                         "type": item.get("ResourceType", ""),
-                        "region": item.get("Region") or "Global",
+                        "region": item.get("Region") or "global",
+                        "account_id": item.get("OwningAccountId", ""),
+                        "service": item.get("Service", ""),
+                        "last_reported_at": self._isoformat(
+                            item.get("LastReportedAt")
+                        ),
                         "arn": arn,
                         "tags": tags,
                     }
@@ -89,7 +109,12 @@ class ResourceService:
             if not next_token:
                 break
 
-        return {"query": query, "resources": resources}
+        return {
+            "query": query,
+            "count": count,
+            "view_arn": view_arn,
+            "resources": resources,
+        }
 
     @staticmethod
     def _instance_name(instance: dict[str, Any]) -> str:

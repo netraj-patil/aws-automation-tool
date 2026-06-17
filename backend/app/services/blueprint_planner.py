@@ -43,6 +43,7 @@ class BlueprintPlanner:
 
     def generate(self, prompt: str) -> DeploymentBlueprint:
         """Return a validated draft blueprint for the user's prompt."""
+        fallback_active = False
         try:
             draft = (
                 self._generate_with_llm(prompt)
@@ -54,9 +55,10 @@ class BlueprintPlanner:
                 "Blueprint planner fell back to deterministic draft",
                 extra={"error_type": type(exc).__name__, "error": str(exc)},
             )
+            fallback_active = True
             draft = self._deterministic_draft(prompt)
 
-        return self._build_blueprint(prompt, draft)
+        return self._build_blueprint(prompt, draft, fallback_active)
 
     def _llm_enabled(self) -> bool:
         mode = os.getenv("BLUEPRINT_PLANNER_MODE", "deterministic").lower()
@@ -105,14 +107,52 @@ class BlueprintPlanner:
         normalized = prompt.lower()
         resources: list[BlueprintResource] = []
 
-        include_app = _mentions_any(
+        include_react_dashboard = _mentions_any(
+            normalized, ("react dashboard", "react", "frontend", "front end", "ui")
+        )
+        include_fastapi_backend = _mentions_any(
+            normalized,
+            (
+                "fastapi backend",
+                "backend",
+                "api backend",
+                "fastapi service",
+            ),
+        )
+        include_app = not include_fastapi_backend and _mentions_any(
             normalized, ("fastapi", "app", "application", "server", "api")
         )
         include_db = _mentions_any(
-            normalized, ("postgresql", "postgres", "database", "db", "rds")
+            normalized,
+            (
+                "postgresql",
+                "postgres",
+                "postgres database",
+                "relational database",
+                "database",
+                "rds",
+            ),
         )
         include_s3 = _mentions_any(
             normalized, ("s3", "storage", "bucket", "object storage")
+        )
+        include_boto3_layer = _mentions_any(
+            normalized,
+            ("boto3", "aws cli", "awscli", "aws sdk", "aws api layer"),
+        )
+        include_ec2 = _mentions_any(normalized, ("ec2", "instance", "instances"))
+        include_lambda = _mentions_any(normalized, ("lambda", "serverless"))
+        include_redis = _mentions_any(normalized, ("redis", "elasticache"))
+        include_mongo = _mentions_any(normalized, ("mongodb", "mongo"))
+        include_planner_agent = _mentions_any(
+            normalized, ("planner agent", "planning agent")
+        )
+        include_cost_agent = _mentions_any(normalized, ("cost agent",))
+        include_health_agent = _mentions_any(
+            normalized, ("health agent", "monitoring agent")
+        )
+        include_approval_agent = _mentions_any(
+            normalized, ("approval agent", "approver agent")
         )
         include_alb = _mentions_any(
             normalized, ("https", "load balancer", "alb", "ssl", "tls")
@@ -128,6 +168,51 @@ class BlueprintPlanner:
                 "prod",
             ),
         )
+
+        if _mentions_any(normalized, ("user", "users", "operator", "admin")):
+            resources.append(
+                BlueprintResource(
+                    id="user",
+                    type="actor",
+                    name="User",
+                    service="external",
+                    config={"role": "operator"},
+                    visibility="public",
+                    estimated_monthly_cost=0,
+                    risk_level="low",
+                )
+            )
+
+        if include_react_dashboard:
+            resources.append(
+                BlueprintResource(
+                    id="react-dashboard",
+                    type="frontend",
+                    name="React dashboard",
+                    service="react",
+                    config={"runtime": "browser", "purpose": "operations ui"},
+                    visibility="public",
+                    estimated_monthly_cost=0,
+                    risk_level="low",
+                )
+            )
+
+        if include_fastapi_backend:
+            resources.append(
+                BlueprintResource(
+                    id="fastapi-backend",
+                    type="api",
+                    name="FastAPI backend",
+                    service="ecs",
+                    config={
+                        "runtime": "python-fastapi",
+                        "container_port": 8000,
+                    },
+                    visibility="private",
+                    estimated_monthly_cost=35,
+                    risk_level="medium",
+                )
+            )
 
         if include_app:
             resources.append(
@@ -145,6 +230,48 @@ class BlueprintPlanner:
                     visibility="private",
                     estimated_monthly_cost=55,
                     risk_level="medium",
+                )
+            )
+
+        if include_boto3_layer:
+            resources.append(
+                BlueprintResource(
+                    id="boto3-layer",
+                    type="integration",
+                    name="boto3 / AWS CLI layer",
+                    service="boto3",
+                    config={"sdk": "boto3", "purpose": "aws-api-dispatch"},
+                    visibility="internal",
+                    estimated_monthly_cost=0,
+                    risk_level="medium",
+                )
+            )
+
+        if include_ec2:
+            resources.append(
+                BlueprintResource(
+                    id="ec2",
+                    type="compute",
+                    name="EC2",
+                    service="ec2",
+                    config={"instance_family": "general-purpose"},
+                    visibility="private",
+                    estimated_monthly_cost=8,
+                    risk_level="medium",
+                )
+            )
+
+        if include_lambda:
+            resources.append(
+                BlueprintResource(
+                    id="lambda",
+                    type="compute",
+                    name="Lambda",
+                    service="lambda",
+                    config={"runtime": "python", "trigger": "managed"},
+                    visibility="private",
+                    estimated_monthly_cost=3,
+                    risk_level="low",
                 )
             )
 
@@ -167,6 +294,34 @@ class BlueprintPlanner:
                 )
             )
 
+        if include_redis:
+            resources.append(
+                BlueprintResource(
+                    id="redis-state",
+                    type="cache",
+                    name="Redis latest state",
+                    service="elasticache",
+                    config={"engine": "redis", "purpose": "latest-state"},
+                    visibility="private",
+                    estimated_monthly_cost=12,
+                    risk_level="medium",
+                )
+            )
+
+        if include_mongo:
+            resources.append(
+                BlueprintResource(
+                    id="mongodb-history",
+                    type="database",
+                    name="MongoDB history",
+                    service="mongodb",
+                    config={"purpose": "historical-records"},
+                    visibility="private",
+                    estimated_monthly_cost=18,
+                    risk_level="medium",
+                )
+            )
+
         if include_s3:
             resources.append(
                 BlueprintResource(
@@ -184,6 +339,47 @@ class BlueprintPlanner:
                     risk_level="low",
                 )
             )
+
+        agent_specs = [
+            (
+                include_planner_agent,
+                "planner-agent",
+                "Planner Agent",
+                "Produces reviewed deployment plans.",
+            ),
+            (
+                include_cost_agent,
+                "cost-agent",
+                "Cost Agent",
+                "Estimates resource costs before execution.",
+            ),
+            (
+                include_health_agent,
+                "health-agent",
+                "Health Agent",
+                "Checks operational signals and service health.",
+            ),
+            (
+                include_approval_agent,
+                "approval-agent",
+                "Approval Agent",
+                "Gates high-risk or destructive changes.",
+            ),
+        ]
+        for include_agent, resource_id, name, purpose in agent_specs:
+            if include_agent:
+                resources.append(
+                    BlueprintResource(
+                        id=resource_id,
+                        type="agent",
+                        name=name,
+                        service="ai-agent",
+                        config={"purpose": purpose},
+                        visibility="internal",
+                        estimated_monthly_cost=0,
+                        risk_level="low",
+                    )
+                )
 
         if include_alb:
             resources.append(
@@ -244,13 +440,23 @@ class BlueprintPlanner:
         )
 
     def _build_blueprint(
-        self, prompt: str, draft: BlueprintDraftPayload
+        self,
+        prompt: str,
+        draft: BlueprintDraftPayload,
+        fallback_active: bool = False,
     ) -> DeploymentBlueprint:
         resources = draft.resources
         breakdown = {
             resource.id: resource.estimated_monthly_cost for resource in resources
         }
         total = sum(breakdown.values())
+        diagram_mermaid = generate_blueprint_mermaid(
+            resources,
+            draft.connections,
+        )
+        logger.info("Diagram debug - user prompt: %s", prompt)
+        logger.info("Diagram debug - demo/fallback active: %s", fallback_active)
+        logger.info("Diagram debug - final diagram_mermaid: %s", diagram_mermaid)
 
         return DeploymentBlueprint(
             blueprint_id=f"bp_{uuid4().hex[:12]}",
@@ -260,10 +466,7 @@ class BlueprintPlanner:
             summary=draft.summary,
             resources=resources,
             connections=draft.connections,
-            diagram_mermaid=generate_blueprint_mermaid(
-                resources,
-                draft.connections,
-            ),
+            diagram_mermaid=diagram_mermaid,
             estimated_cost=CostEstimate(
                 estimated_monthly_total=total,
                 breakdown=breakdown,
@@ -276,7 +479,10 @@ class BlueprintPlanner:
 
 
 def _mentions_any(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text)
+        for term in terms
+    )
 
 
 def _deterministic_connections(
@@ -294,6 +500,77 @@ def _deterministic_connections(
                 }
             )
         )
+    if {"user", "react-dashboard"} <= resource_ids:
+        connections.append(
+            BlueprintConnection(
+                **{
+                    "from": "user",
+                    "to": "react-dashboard",
+                    "type": "uses",
+                    "description": "Users operate the AWS automation workspace through the React dashboard.",
+                }
+            )
+        )
+    if {"react-dashboard", "fastapi-backend"} <= resource_ids:
+        connections.append(
+            BlueprintConnection(
+                **{
+                    "from": "react-dashboard",
+                    "to": "fastapi-backend",
+                    "type": "calls",
+                    "description": "The React dashboard calls the FastAPI backend.",
+                }
+            )
+        )
+    if {"fastapi-backend", "boto3-layer"} <= resource_ids:
+        connections.append(
+            BlueprintConnection(
+                **{
+                    "from": "fastapi-backend",
+                    "to": "boto3-layer",
+                    "type": "dispatches-to",
+                    "description": "The backend dispatches AWS operations through boto3 and AWS CLI adapters.",
+                }
+            )
+        )
+    if "boto3-layer" in resource_ids:
+        for target in (
+            "ec2",
+            "lambda",
+            "postgres-database",
+            "object-storage",
+        ):
+            if target in resource_ids:
+                connections.append(
+                    BlueprintConnection(
+                        **{
+                            "from": "boto3-layer",
+                            "to": target,
+                            "type": "manages",
+                            "description": f"The boto3 layer manages {target}.",
+                        }
+                    )
+                )
+    if "fastapi-backend" in resource_ids:
+        for target in (
+            "redis-state",
+            "mongodb-history",
+            "planner-agent",
+            "cost-agent",
+            "health-agent",
+            "approval-agent",
+        ):
+            if target in resource_ids:
+                connections.append(
+                    BlueprintConnection(
+                        **{
+                            "from": "fastapi-backend",
+                            "to": target,
+                            "type": "uses",
+                            "description": f"The FastAPI backend uses {target}.",
+                        }
+                    )
+                )
     if {"app-compute", "postgres-database"} <= resource_ids:
         connections.append(
             BlueprintConnection(
@@ -341,9 +618,21 @@ def _draft_name(resource_ids: set[str]) -> str:
 
 def _draft_summary(resource_ids: set[str]) -> str:
     labels = {
+        "user": "user entry point",
+        "react-dashboard": "React dashboard",
+        "fastapi-backend": "FastAPI backend",
+        "boto3-layer": "boto3 AWS integration",
+        "ec2": "EC2 compute",
+        "lambda": "Lambda functions",
         "app-compute": "private application compute",
         "postgres-database": "RDS PostgreSQL",
+        "redis-state": "Redis latest state",
+        "mongodb-history": "MongoDB history",
         "object-storage": "S3 storage",
+        "planner-agent": "Planner Agent",
+        "cost-agent": "Cost Agent",
+        "health-agent": "Health Agent",
+        "approval-agent": "Approval Agent",
         "https-load-balancer": "public HTTPS load balancing",
         "monitoring": "CloudWatch monitoring",
     }

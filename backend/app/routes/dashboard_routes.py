@@ -5,7 +5,13 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
+from app.services.aws_credentials import (
+    MissingAwsCredentialsError,
+    credentials_from_headers,
+)
+from app.services.blueprint_store import blueprint_store
 from app.services.dashboard_service import dashboard_service
+from app.services.deployment_store import deployment_store
 from app.utils.logging_decorator import get_logger
 
 
@@ -22,7 +28,12 @@ PERMISSION_ERROR_CODES = {
 
 
 def _credentials(request: Request) -> dict[str, str | None]:
-    """Read the active browser profile, falling back to boto3's chain."""
+    """Read the active browser profile without using server env credentials."""
+    return credentials_from_headers(request)
+
+
+def _optional_credentials(request: Request) -> dict[str, str | None]:
+    """Read browser credentials when present; missing credentials trigger demo mode."""
     return {
         "aws_access_key_id": request.headers.get("X-AWS-Access-Key-Id"),
         "aws_secret_access_key": request.headers.get(
@@ -61,6 +72,38 @@ def _aws_error(exc: Exception) -> HTTPException:
     )
 
 
+def _missing_credentials_error(exc: MissingAwsCredentialsError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "code": "aws_credentials_required",
+            "message": str(exc),
+        },
+    )
+
+
+@router.get("")
+def dashboard(
+    request: Request,
+    region: str = Query(default="us-east-1", min_length=3),
+) -> dict[str, Any]:
+    """Return the complete AWS Agent Dashboard response."""
+    try:
+        blueprints = blueprint_store.list_all()
+    except Exception:
+        blueprints = []
+    try:
+        deployments = deployment_store.list_all()
+    except Exception:
+        deployments = []
+    return dashboard_service.get_dashboard(
+        region,
+        _optional_credentials(request),
+        blueprints=blueprints,
+        deployments=deployments,
+    )
+
+
 @router.get("/summary")
 def summary(
     request: Request,
@@ -73,6 +116,8 @@ def summary(
         )
     except HTTPException:
         raise
+    except MissingAwsCredentialsError as exc:
+        raise _missing_credentials_error(exc) from exc
     except (BotoCoreError, ClientError) as exc:
         raise _aws_error(exc) from exc
 
@@ -84,6 +129,8 @@ def costs(request: Request) -> dict[str, Any]:
         return dashboard_service.get_costs(_credentials(request))
     except HTTPException:
         raise
+    except MissingAwsCredentialsError as exc:
+        raise _missing_credentials_error(exc) from exc
     except (BotoCoreError, ClientError) as exc:
         raise _aws_error(exc) from exc
 
@@ -103,5 +150,7 @@ def recent_ec2(
         )
     except HTTPException:
         raise
+    except MissingAwsCredentialsError as exc:
+        raise _missing_credentials_error(exc) from exc
     except (BotoCoreError, ClientError) as exc:
         raise _aws_error(exc) from exc

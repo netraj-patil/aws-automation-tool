@@ -13,8 +13,6 @@
     "resource-explorer": "Resource Explorer",
     "visual-planner": "Visual Planner",
     profile: "Profile",
-    "audit-log": "Audit Log",
-    settings: "Settings",
   };
 
   const icons = {
@@ -23,8 +21,6 @@
     chat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4v8Z"></path><path d="M8 9h8M8 13h5"></path></svg>',
     resources: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 17l9 5 9-5"></path></svg>',
     planner: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 3h6v6h-6zM14 15h6v6h-6z"></path><path d="M10 8h2a2 2 0 0 0 2-2v0M10 8h2a2 2 0 0 1 2 2v8"></path></svg>',
-    audit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4"></path><rect x="9" y="3" width="6" height="4" rx="1"></rect><path d="m8 14 2 2 5-5"></path></svg>',
-    settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34A1.7 1.7 0 0 0 14 20.92V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.96 4.6 1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.03 1.53 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path></svg>',
     profile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>',
     collapse: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 7-5 5 5 5"></path></svg>',
     search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>',
@@ -190,8 +186,6 @@
             ${navItem("resource-explorer", "Resource Explorer", icons.resources, viewName)}
             ${navItem("visual-planner", "Visual Planner", icons.planner, viewName)}
             ${navItem("profile", "Profile", icons.profile, viewName)}
-            ${navItem("audit-log", "Audit Log", icons.audit, viewName, { disabled: true, badge: "Coming soon" })}
-            ${navItem("settings", "Settings", icons.settings, viewName, { disabled: true })}
           </nav>
 
           <section class="profile-card" aria-label="Active AWS credential profile">

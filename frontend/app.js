@@ -1,13 +1,15 @@
 (function initializeApp(global) {
   "use strict";
 
+  document.documentElement.classList.add("dark");
+
   const BASE_URL = "http://localhost:8000/api/v1";
   const TOKEN_KEY = "jwt_token";
   const USER_KEY = "auth_user";
   const GUEST_CREDENTIALS_KEY = "guest_aws_credentials";
-  const PUBLIC_VIEWS = new Set(["login", "register", "guest"]);
+  const PUBLIC_VIEWS = new Set(["landing", "login", "register", "guest"]);
   const DEFAULT_AUTHENTICATED_VIEW = "dashboard";
-  const DEFAULT_PUBLIC_VIEW = "login";
+  const DEFAULT_PUBLIC_VIEW = "landing";
 
   const auth = {
     getToken() {
@@ -175,6 +177,126 @@
     `;
   }
 
+  function landingIcon(name) {
+    const icons = {
+      chat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4v8Z"></path><path d="M8 9h8M8 13h5"></path></svg>',
+      explorer: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 17l9 5 9-5"></path></svg>',
+      planner: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 3h6v6h-6zM14 15h6v6h-6z"></path><path d="M10 8h2a2 2 0 0 0 2-2M10 8h2a2 2 0 0 1 2 2v8"></path></svg>',
+      guard: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 7v5c0 5-3.4 8.2-8 9-4.6-.8-8-4-8-9V7l8-4Z"></path><path d="m9 12 2 2 4-5"></path></svg>',
+      deploy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18h14M7 18V8l5-3 5 3v10"></path><path d="M9 18v-6h6v6"></path></svg>',
+      cost: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path></svg>',
+    };
+    return icons[name] || icons.deploy;
+  }
+
+  function renderLanding() {
+    const features = [
+      ["chat", "AI AWS operator", "Describe an outcome in plain language and let the agent choose safe AWS tool calls, ask for approvals, and explain what happened."],
+      ["planner", "Visual architecture planner", "Generate production blueprints with interactive diagrams, estimated cost, security review, and dry-run execution history."],
+      ["explorer", "Resource Explorer", "Search your AWS account through Resource Explorer-style results with resource type, region, ARN, service, tags, and account metadata."],
+      ["guard", "Safety gates", "Credentials are supplied by the active browser profile, destructive flows are reviewed, and high-risk plans require deliberate override."],
+      ["cost", "Cost and risk insight", "See static monthly estimates, resource-level risk, security warnings, and recommended fixes before you touch infrastructure."],
+      ["deploy", "Execution workspace", "Track planned resources, dry-run logs, deployment records, and next actions from one focused dashboard."],
+    ];
+
+    return `
+      <div class="view landing-view" data-view="landing">
+        <section class="landing-hero" aria-labelledby="landing-title">
+          <div class="landing-hero__scene" aria-hidden="true">
+            <div class="landing-grid-plane"></div>
+            <span class="landing-node landing-node--chat">AI</span>
+            <span class="landing-node landing-node--planner">Plan</span>
+            <span class="landing-node landing-node--explorer">AWS</span>
+            <span class="landing-node landing-node--guard">Guard</span>
+            <span class="landing-node landing-node--deploy">Run</span>
+            <i class="landing-link landing-link--one"></i>
+            <i class="landing-link landing-link--two"></i>
+            <i class="landing-link landing-link--three"></i>
+            <i class="landing-link landing-link--four"></i>
+            <div class="landing-console">
+              <span>cloudforge plan --review</span>
+              <strong>5 resources mapped</strong>
+              <em>security gate passed</em>
+            </div>
+          </div>
+          <nav class="landing-nav" aria-label="Public navigation">
+            <a class="landing-brand" href="#landing" data-route="landing" aria-label="AWS Automation Tool home">
+              <span class="landing-brand__mark">${landingIcon("deploy")}</span>
+              <span>AWS Automation Tool</span>
+            </a>
+            <div>
+              <a href="#login" data-route="login">Login</a>
+              <a class="landing-nav__button" href="#register" data-route="register">Sign up</a>
+            </div>
+          </nav>
+          <div class="landing-hero__content">
+            <span class="landing-kicker">AI workspace for safer AWS operations</span>
+            <h1 id="landing-title">Plan, inspect, and execute AWS changes without getting lost in the console.</h1>
+            <p>
+              This project combines an AI automation chat, Resource Explorer, visual deployment blueprints,
+              cost estimates, security checks, credential profiles, and deployment dry-runs in one focused workspace.
+            </p>
+            <div class="landing-actions">
+              <a class="landing-button landing-button--primary" href="#register" data-route="register">Create free account</a>
+              <a class="landing-button landing-button--secondary" href="#guest" data-route="guest">Try with temporary credentials</a>
+            </div>
+            <div class="landing-proof" aria-label="Product highlights">
+              <span><strong>6</strong> core AWS workflows</span>
+              <span><strong>0</strong> blind deploys</span>
+              <span><strong>1</strong> calm control room</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="landing-section landing-section--features" aria-labelledby="landing-features-title">
+          <div class="landing-section__heading">
+            <span class="landing-kicker">What it does</span>
+            <h2 id="landing-features-title">Everything before, during, and after an AWS change.</h2>
+          </div>
+          <div class="landing-feature-grid">
+            ${features.map(([icon, title, text]) => `
+              <article class="landing-feature-card">
+                <span>${landingIcon(icon)}</span>
+                <h3>${title}</h3>
+                <p>${text}</p>
+              </article>
+            `).join("")}
+          </div>
+        </section>
+
+        <section class="landing-section landing-workflow" aria-labelledby="landing-workflow-title">
+          <div class="landing-section__heading">
+            <span class="landing-kicker">Why sign up</span>
+            <h2 id="landing-workflow-title">Keep your AWS work intentional, reviewable, and repeatable.</h2>
+          </div>
+          <div class="landing-workflow__track">
+            ${[
+              ["Ask", "Tell the agent what you want to build, inspect, or fix."],
+              ["Review", "Study the plan, architecture diagram, cost estimate, and risk warnings."],
+              ["Approve", "Save or approve only the plans that pass your review."],
+              ["Execute", "Run dry-runs and keep deployment logs tied to the blueprint."],
+            ].map(([step, text], index) => `
+              <article class="landing-step" style="--step-index: ${index}">
+                <span>${index + 1}</span>
+                <h3>${step}</h3>
+                <p>${text}</p>
+              </article>
+            `).join("")}
+          </div>
+        </section>
+
+        <section class="landing-cta" aria-labelledby="landing-cta-title">
+          <div>
+            <span class="landing-kicker">Ready when you are</span>
+            <h2 id="landing-cta-title">Create an account and turn AWS automation into a reviewed workflow.</h2>
+            <p>Save your profile, return to blueprints, and keep your automation history organized across sessions.</p>
+          </div>
+          <a class="landing-button landing-button--primary" href="#register" data-route="register">Sign up now</a>
+        </section>
+      </div>
+    `;
+  }
+
   function passwordField(id, label, autocomplete, placeholder) {
     return `
       <div class="field" data-field="${id}">
@@ -239,6 +361,10 @@
             Don't have an account?
             <a href="#register" data-route="register">Register</a>
           </p>
+          <p class="auth-switch auth-switch--subtle">
+            Want the overview first?
+            <a href="#landing" data-route="landing">Back to landing page</a>
+          </p>
 
           <div class="auth-divider"><span>or continue with</span></div>
 
@@ -302,6 +428,10 @@
             Already have an account?
             <a href="#login" data-route="login">Sign in</a>
           </p>
+          <p class="auth-switch auth-switch--subtle">
+            Want the overview first?
+            <a href="#landing" data-route="landing">Back to landing page</a>
+          </p>
         </article>
       </div>
     `;
@@ -360,6 +490,10 @@
             Prefer an account?
             <a href="#login" data-route="login">Back to sign in</a>
           </p>
+          <p class="auth-switch auth-switch--subtle">
+            Not sure yet?
+            <a href="#landing" data-route="landing">Read what the tool does</a>
+          </p>
         </article>
       </div>
     `;
@@ -398,6 +532,7 @@
   }
 
   const viewTitles = {
+    landing: "AWS Automation Tool",
     login: "Sign in",
     register: "Create account",
     guest: "Temporary credentials",
@@ -410,6 +545,7 @@
 
   const router = {
     routes: {
+      landing: renderLanding,
       login: renderLogin,
       register: renderRegister,
       guest: renderGuest,

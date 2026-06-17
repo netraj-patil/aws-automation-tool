@@ -11,6 +11,13 @@ from pydantic import (
     root_validator,
 )
 
+from app.models.deployment_models import (
+    DeploymentLog,
+    DeploymentRecord,
+    DeploymentResource,
+    DeploymentStatus,
+)
+
 
 BlueprintStatus = Literal[
     "draft",
@@ -23,7 +30,6 @@ BlueprintStatus = Literal[
 ]
 RiskLevel = Literal["low", "medium", "high", "critical"]
 ResourceVisibility = Literal["public", "private", "internal"]
-DeploymentStatus = Literal["deploying", "deployed", "failed", "cancelled"]
 WarningSeverity = Literal["info", "low", "medium", "high", "critical"]
 
 
@@ -96,26 +102,6 @@ class BlueprintConnection(StrictBlueprintModel):
     description: str = Field(min_length=1)
 
 
-class DeploymentRecord(StrictBlueprintModel):
-    """Deployment lifecycle record for a blueprint execution attempt."""
-
-    record_id: str = Field(min_length=1)
-    blueprint_id: str = Field(min_length=1)
-    status: DeploymentStatus
-    started_at: datetime = Field(default_factory=_utc_now)
-    finished_at: datetime | None = None
-    logs: list[str] = Field(default_factory=list)
-    error: str | None = None
-
-    @root_validator(skip_on_failure=True)
-    def validate_finished_after_started(cls, values: dict) -> dict:
-        started_at = values.get("started_at")
-        finished_at = values.get("finished_at")
-        if finished_at and started_at and finished_at < started_at:
-            raise ValueError("finished_at must be after started_at")
-        return values
-
-
 class DeploymentBlueprint(StrictBlueprintModel):
     """First-class cloud architecture plan produced before execution."""
 
@@ -140,24 +126,14 @@ class DeploymentBlueprint(StrictBlueprintModel):
             raise ValueError("updated_at must be after created_at")
         return values
 
-
-DeploymentLog = DeploymentRecord
-
-
 class BlueprintExecutionRequest(StrictBlueprintModel):
     """Request body for executing an approved deployment blueprint."""
 
     override_high_risk: bool = False
 
 
-class PlannedResource(StrictBlueprintModel):
+class PlannedResource(DeploymentResource):
     """A dry-run resource action planned from a blueprint resource."""
-
-    resource_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    service: str = Field(min_length=1)
-    type: str = Field(min_length=1)
-    action: str = Field(default="prepare")
 
 
 class BlueprintExecutionResponse(StrictBlueprintModel):

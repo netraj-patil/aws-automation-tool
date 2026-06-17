@@ -357,7 +357,7 @@
       <div class="view profile-view" data-view="profile">
         <div class="profile-page-heading">
           <div>
-            <h2>Profile settings</h2>
+            <h2>Profile</h2>
             <p>Manage your account and AWS credential profiles.</p>
           </div>
         </div>

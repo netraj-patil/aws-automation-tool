@@ -1,8 +1,6 @@
 """Dry-run execution for approved deployment blueprints."""
 
-from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
 
 import boto3
 from pydantic import ValidationError
@@ -12,14 +10,14 @@ from app.models.blueprint_models import (
     DeploymentBlueprint,
     PlannedResource,
 )
+from app.services.aws_credentials import (
+    MissingAwsCredentialsError,
+    explicit_session_kwargs,
+)
 
 
 class BlueprintValidationError(ValueError):
     """Raised when a stored blueprint no longer matches the schema."""
-
-
-class MissingAwsCredentialsError(ValueError):
-    """Raised when no usable AWS credentials are available."""
 
 
 class BlueprintExecutor:
@@ -40,16 +38,8 @@ class BlueprintExecutor:
     def check_credentials(
         self, credentials: dict[str, str | None]
     ) -> None:
-        """Build a boto3 session from request/profile credentials."""
-        session_kwargs = {
-            key: value
-            for key, value in credentials.items()
-            if value and key in {
-                "aws_access_key_id",
-                "aws_secret_access_key",
-                "aws_session_token",
-            }
-        }
+        """Build a boto3 session from user-provided credentials only."""
+        session_kwargs = explicit_session_kwargs(credentials)
         session = boto3.Session(**session_kwargs)
         if session.get_credentials() is None:
             raise MissingAwsCredentialsError(
@@ -73,7 +63,6 @@ class BlueprintExecutor:
         override_high_risk: bool = False,
     ) -> BlueprintExecutionResponse:
         """Return ordered dry-run logs and resources from the blueprint."""
-        now = datetime.now(timezone.utc)
         logs = [
             "Validating blueprint",
             "Checking approval",
@@ -93,22 +82,27 @@ class BlueprintExecutor:
 
         logs.append("Deployment dry-run completed")
         return BlueprintExecutionResponse(
-            deployment_id=f"dep_{uuid4().hex[:12]}",
+            deployment_id="pending",
             blueprint_id=blueprint.blueprint_id,
             status="deployed",
             logs=logs,
-            planned_resources=[
-                PlannedResource(
-                    resource_id=resource.id,
-                    name=resource.name,
-                    service=resource.service,
-                    type=resource.type,
-                )
-                for resource in blueprint.resources
-            ],
-            created_at=now,
-            updated_at=now,
+            planned_resources=self.planned_resources(blueprint),
         )
+
+    def planned_resources(
+        self,
+        blueprint: DeploymentBlueprint,
+    ) -> list[PlannedResource]:
+        """Return dry-run resource actions for the blueprint."""
+        return [
+            PlannedResource(
+                resource_id=resource.id,
+                name=resource.name,
+                service=resource.service,
+                type=resource.type,
+            )
+            for resource in blueprint.resources
+        ]
 
     @staticmethod
     def _dump_blueprint(blueprint: DeploymentBlueprint) -> dict[str, Any]:

@@ -63,6 +63,17 @@ class BlueprintStore:
             raise BlueprintNotFoundError(blueprint_id)
         return self._copy_blueprint(blueprint)
 
+    def list_all(self) -> list[DeploymentBlueprint]:
+        """Return all stored blueprints, newest first."""
+        return [
+            self._copy_blueprint(blueprint)
+            for blueprint in sorted(
+                self._blueprints.values(),
+                key=lambda item: item.created_at,
+                reverse=True,
+            )
+        ]
+
     def save(self, blueprint_id: str) -> DeploymentBlueprint:
         """Move a draft blueprint into the saved state."""
         blueprint = self._get_mutable(blueprint_id)

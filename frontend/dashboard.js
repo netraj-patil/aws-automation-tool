@@ -1,16 +1,21 @@
 (function initializeDashboard(global) {
   "use strict";
 
-  const ACTIONS_KEY = "agent_executions";
-  const sectionLoaders = {};
+  const state = {
+    data: null,
+    loading: false,
+    error: "",
+    serviceFilter: "all",
+    search: "",
+  };
 
   const icons = {
-    ec2: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 9h8M8 13h5M8 17h3"></path></svg>',
-    s3: '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"></path></svg>',
-    rds: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4zM7 4h10v3M8 11h8M8 15h5"></path></svg>',
-    iam: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"></circle><path d="M5 20c.5-4 2.8-6 7-6s6.5 2 7 6"></path></svg>',
-    vpc: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"></circle><circle cx="18" cy="6" r="2"></circle><circle cx="12" cy="18" r="2"></circle><path d="m7.7 7.1 3.2 8.8M16.3 7.1l-3.2 8.8M8 6h8"></path></svg>',
-    action: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 9-12h-7l1-8Z"></path></svg>',
+    resources: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"></path><path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5"></path></svg>',
+    running: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"></path></svg>',
+    broken: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01"></path><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"></path></svg>',
+    cost: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path></svg>',
+    plan: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h12M4 19h8"></path><path d="m16 17 2 2 4-5"></path></svg>',
+    approval: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 7v5c0 5-3.4 8.2-8 9-4.6-.8-8-4-8-9V7l8-4Z"></path><path d="m9 12 2 2 4-5"></path></svg>',
   };
 
   function escapeHtml(value) {
@@ -22,70 +27,8 @@
       .replaceAll("'", "&#039;");
   }
 
-  function skeletonLines(count, className = "") {
-    return Array.from(
-      { length: count },
-      (_, index) => `<span class="skeleton ${className}" style="--skeleton-index: ${index}"></span>`,
-    ).join("");
-  }
-
-  function summarySkeleton() {
-    return `
-      <div class="summary-grid" aria-label="Loading resource summary">
-        ${Array.from({ length: 5 }, () => `
-          <article class="summary-card summary-card--loading">
-            <span class="skeleton skeleton--icon"></span>
-            <div>${skeletonLines(2, "skeleton--text")}</div>
-          </article>
-        `).join("")}
-      </div>
-    `;
-  }
-
-  function panelSkeleton(type) {
-    if (type === "table") {
-      return `
-        <div class="table-skeleton">
-          ${skeletonLines(1, "skeleton--heading")}
-          ${Array.from({ length: 6 }, () => skeletonLines(1, "skeleton--row")).join("")}
-        </div>
-      `;
-    }
-    if (type === "actions") {
-      return `<div class="actions-skeleton">${Array.from({ length: 5 }, () => `
-        <div class="actions-skeleton__row">
-          <span class="skeleton skeleton--icon"></span>
-          ${skeletonLines(1, "skeleton--row")}
-        </div>
-      `).join("")}</div>`;
-    }
-    return `
-      <div class="chart-skeleton">
-        ${skeletonLines(2, "skeleton--text")}
-        <span class="skeleton skeleton--chart"></span>
-      </div>
-    `;
-  }
-
-  function render() {
-    return `
-      <div class="view dashboard-view" data-view="dashboard">
-        <section id="dashboard-summary" aria-live="polite">${summarySkeleton()}</section>
-
-        <div class="dashboard-main-grid">
-          <section class="dashboard-panel" id="dashboard-costs" aria-live="polite">
-            ${panelSkeleton("chart")}
-          </section>
-          <section class="dashboard-panel" id="dashboard-ec2" aria-live="polite">
-            ${panelSkeleton("table")}
-          </section>
-        </div>
-
-        <section class="dashboard-panel dashboard-panel--actions" id="dashboard-actions" aria-live="polite">
-          ${panelSkeleton("actions")}
-        </section>
-      </div>
-    `;
+  function isMounted() {
+    return global.router?.currentView === "dashboard";
   }
 
   function activeRegion() {
@@ -94,83 +37,10 @@
       || "us-east-1";
   }
 
-  function isMounted() {
-    return global.router?.currentView === "dashboard";
-  }
-
-  function sectionElement(section) {
-    return document.getElementById(`dashboard-${section}`);
-  }
-
-  function isPermissionError(error) {
-    return error?.status === 403
-      || error?.data?.detail?.code === "aws_permission_required";
-  }
-
-  function renderError(section, error) {
-    const element = sectionElement(section);
-    if (!element || !isMounted()) {
-      return;
-    }
-    const permissionError = isPermissionError(error);
-    const message = error?.message || "The request to AWS failed.";
-    element.innerHTML = `
-      <div class="dashboard-error${permissionError ? " dashboard-error--permission" : ""}" role="${permissionError ? "status" : "alert"}">
-        <span class="dashboard-error__icon" aria-hidden="true">${permissionError ? "i" : "!"}</span>
-        <div>
-          <strong>${permissionError ? "AWS permission needed" : `Unable to load ${section === "ec2" ? "EC2 instances" : section}`}</strong>
-          <p>${escapeHtml(message)}</p>
-        </div>
-        <button class="button button--secondary" type="button" data-dashboard-retry="${section}">Retry</button>
-      </div>
-    `;
-  }
-
-  function summaryCard(service, value, label, detail = "") {
-    return `
-      <article class="summary-card summary-card--${service}">
-        <span class="summary-card__icon">${icons[service]}</span>
-        <div class="summary-card__content">
-          <p class="summary-card__value">${value}</p>
-          <p class="summary-card__label">${escapeHtml(label)}</p>
-          ${detail ? `<p class="summary-card__detail">${detail}</p>` : ""}
-        </div>
-      </article>
-    `;
-  }
-
-  function renderSummary(data) {
-    const element = sectionElement("summary");
-    if (!element || !isMounted()) {
-      return;
-    }
-    const metric = (value) => value === null || value === undefined
-      ? '<span class="summary-card__unavailable">--</span>'
-      : Number(value);
-    const warnings = Array.isArray(data.permission_warnings)
-      ? data.permission_warnings
-      : [];
-    element.innerHTML = `
-      <div class="summary-grid">
-        ${summaryCard(
-          "ec2",
-          data.ec2?.running === null || data.ec2?.total === null
-            ? metric(null)
-            : `<span class="summary-card__running">${Number(data.ec2?.running || 0)}</span><span class="summary-card__total"> / ${Number(data.ec2?.total || 0)}</span>`,
-          "EC2 Instances",
-          "running / total",
-        )}
-        ${summaryCard("s3", metric(data.s3?.total), "S3 Buckets")}
-        ${summaryCard("rds", metric(data.rds?.total), "RDS Instances")}
-        ${summaryCard("iam", metric(data.iam?.total), "IAM Users")}
-        ${summaryCard("vpc", metric(data.vpc?.custom), "Custom VPCs")}
-      </div>
-      ${warnings.length ? `
-        <p class="dashboard-permission-note">
-          Some counts need additional read permission: ${escapeHtml(warnings.join(", "))}.
-        </p>
-      ` : ""}
-    `;
+  function titleCase(value) {
+    return String(value || "")
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
   function currencyFormatter(currency) {
@@ -178,107 +48,25 @@
       return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: currency || "USD",
-        minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
     } catch {
       return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
+        maximumFractionDigits: 2,
       });
     }
   }
 
-  function costChart(daily, currency) {
-    const width = 660;
-    const height = 190;
-    const chartTop = 10;
-    const chartBottom = 150;
-    const chartHeight = chartBottom - chartTop;
-    const values = daily.map((item) => Number(item.amount || 0));
-    const maximum = Math.max(...values, 0.01);
-    const slot = width / Math.max(daily.length, 1);
-    const barWidth = Math.max(4, slot - 5);
-    const format = currencyFormatter(currency);
-
-    const bars = daily.map((item, index) => {
-      const value = Number(item.amount || 0);
-      const barHeight = Math.max(value ? 2 : 0, (value / maximum) * chartHeight);
-      const x = index * slot + (slot - barWidth) / 2;
-      const y = chartBottom - barHeight;
-      return `
-        <rect class="cost-chart__bar" x="${x.toFixed(2)}" y="${y.toFixed(2)}"
-          width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2">
-          <title>${escapeHtml(item.date)}: ${escapeHtml(format.format(value))}</title>
-        </rect>
-      `;
-    }).join("");
-    const ticks = daily.map((item, index) => {
-      if (index % 6 !== 0 && index !== daily.length - 1) {
-        return "";
-      }
-      const date = new Date(`${item.date}T00:00:00`);
-      const label = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      return `<text x="${(index * slot + slot / 2).toFixed(2)}" y="178" text-anchor="middle">${escapeHtml(label)}</text>`;
-    }).join("");
-
-    return `
-      <svg class="cost-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daily AWS spend for the last 30 days">
-        <line x1="0" y1="${chartBottom}" x2="${width}" y2="${chartBottom}"></line>
-        ${bars}
-        ${ticks}
-      </svg>
-    `;
+  function formatMoney(value, currency) {
+    return currencyFormatter(currency).format(Number(value || 0));
   }
 
-  function renderCosts(data) {
-    const element = sectionElement("costs");
-    if (!element || !isMounted()) {
-      return;
-    }
-    const delta = Number(data.delta_percent || 0);
-    const direction = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
-    const arrow = delta > 0 ? "\u2191" : delta < 0 ? "\u2193" : "\u2192";
-    const format = currencyFormatter(data.currency);
-    const daily = Array.isArray(data.daily) ? data.daily : [];
-
-    element.innerHTML = `
-      <header class="dashboard-panel__header">
-        <div>
-          <h2>Cost <span>(Last 30 days)</span></h2>
-          <div class="cost-total">
-            <strong>${escapeHtml(format.format(Number(data.total || 0)))}</strong>
-            <span class="cost-delta cost-delta--${direction}">${arrow} ${Math.abs(delta).toFixed(1)}% vs last month</span>
-          </div>
-        </div>
-      </header>
-      <div class="dashboard-panel__body dashboard-panel__body--chart">
-        ${daily.length ? costChart(daily, data.currency) : '<p class="dashboard-empty">No cost data is available for this period.</p>'}
-      </div>
-    `;
-  }
-
-  function stateClass(state) {
-    if (state === "running") {
-      return "success";
-    }
-    if (["pending", "stopping", "shutting-down", "in_progress"].includes(state)) {
-      return "warning";
-    }
-    if (["terminated", "stopped", "failed", "error"].includes(state)) {
-      return "danger";
-    }
-    return "neutral";
-  }
-
-  function formatLaunchTime(value) {
-    if (!value) {
-      return "\u2014";
-    }
+  function formatDate(value) {
+    if (!value) return "-";
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
+    if (Number.isNaN(date.getTime())) return String(value);
     return date.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
@@ -287,163 +75,446 @@
     });
   }
 
-  function renderInstances(data) {
-    const element = sectionElement("ec2");
-    if (!element || !isMounted()) {
+  function tone(value) {
+    const normalized = String(value || "").toLowerCase();
+    if (["running", "active", "healthy", "success", "low", "deployed", "completed"].includes(normalized)) return "success";
+    if (["warning", "medium", "planned", "pending_approval", "approved", "executing"].includes(normalized)) return "warning";
+    if (["failed", "critical", "high", "error", "cancelled"].includes(normalized)) return "danger";
+    return "neutral";
+  }
+
+  function badge(value, className = "") {
+    return `<span class="state-badge state-badge--${tone(value)}${className ? ` ${className}` : ""}">${escapeHtml(titleCase(value))}</span>`;
+  }
+
+  function render() {
+    return `
+      <div class="view dashboard-view" data-view="dashboard">
+        <section id="dashboard-root" aria-live="polite">
+          ${loadingState()}
+        </section>
+      </div>
+    `;
+  }
+
+  function loadingState() {
+    return `
+      <div class="dashboard-loading-grid">
+        ${Array.from({ length: 6 }, (_, index) => `
+          <article class="summary-card summary-card--loading">
+            <span class="skeleton skeleton--icon"></span>
+            <div>
+              <span class="skeleton skeleton--text" style="--skeleton-index: ${index}"></span>
+              <span class="skeleton skeleton--text" style="--skeleton-index: ${index + 1}"></span>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function errorState(message) {
+    return `
+      <div class="dashboard-error" role="alert">
+        <span class="dashboard-error__icon" aria-hidden="true">!</span>
+        <div>
+          <strong>Unable to load dashboard</strong>
+          <p>${escapeHtml(message)}</p>
+        </div>
+        <button class="button button--secondary" type="button" data-dashboard-action="retry">Retry</button>
+      </div>
+    `;
+  }
+
+  function renderBody() {
+    if (!isMounted()) return;
+    const root = document.getElementById("dashboard-root");
+    if (!root) return;
+    if (state.loading) {
+      root.innerHTML = loadingState();
       return;
     }
-    const instances = Array.isArray(data.instances) ? data.instances : [];
-    const rows = instances.map((instance) => `
+    if (state.error) {
+      root.innerHTML = errorState(state.error);
+      return;
+    }
+    if (!state.data) {
+      root.innerHTML = loadingState();
+      return;
+    }
+
+    root.innerHTML = `
+      ${modeBanner(state.data)}
+      ${warningsPanel(state.data.warnings)}
+      ${overviewPanel(state.data)}
+      ${summaryGrid(state.data)}
+      <div class="dashboard-workbench">
+        ${inventorySection(state.data.resources || [])}
+        ${costSection(state.data.costs || {})}
+        ${runningSection(state.data.running_resources || [])}
+        ${brokenSection(state.data.broken_resources || [])}
+        ${agentPlanSection(state.data.agent_next_actions || [])}
+        ${approvalsSection(state.data.pending_approvals || [])}
+        ${activitySection(state.data.recent_activity || [])}
+      </div>
+    `;
+  }
+
+  function overviewPanel(data) {
+    const summary = data.summary || {};
+    const costs = data.costs || {};
+    const currency = costs.currency || "USD";
+    const broken = Number(summary.broken_resources || 0);
+    const approvals = Number(summary.pending_approvals || 0);
+    const actions = Number(summary.pending_agent_actions || 0);
+    const attentionTone = broken || approvals ? "warning" : "success";
+
+    return `
+      <section class="dashboard-overview" aria-label="AWS account overview">
+        <div class="dashboard-overview__main">
+          <span class="dashboard-overview__eyebrow">Active region</span>
+          <h2>${escapeHtml(activeRegion())}</h2>
+          <p>${escapeHtml(summary.total_resources || 0)} resources monitored across the current workspace.</p>
+          <div class="dashboard-overview__stats">
+            <span><strong>${escapeHtml(summary.running_resources || 0)}</strong> running</span>
+            <span><strong>${escapeHtml(formatMoney(summary.monthly_cost_estimate, currency))}</strong> monthly estimate</span>
+            <span><strong>${escapeHtml(actions)}</strong> agent actions</span>
+          </div>
+        </div>
+        <aside class="dashboard-attention dashboard-attention--${attentionTone}">
+          <span class="dashboard-attention__label">Needs attention</span>
+          <strong>${escapeHtml(broken + approvals)}</strong>
+          <p>${escapeHtml(broken)} broken checks and ${escapeHtml(approvals)} approvals waiting.</p>
+        </aside>
+      </section>
+    `;
+  }
+
+  function modeBanner(data) {
+    if (data.mode !== "demo" || !data.banner) return "";
+    return `
+      <div class="dashboard-mode-banner" role="status">
+        <strong>Demo mode</strong>
+        <span>${escapeHtml(data.banner)}</span>
+      </div>
+    `;
+  }
+
+  function warningsPanel(warnings) {
+    if (!Array.isArray(warnings) || !warnings.length) return "";
+    return `
+      <div class="dashboard-warning-list" role="status">
+        ${warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}
+      </div>
+    `;
+  }
+
+  function summaryGrid(data) {
+    const summary = data.summary || {};
+    const currency = data.costs?.currency || "USD";
+    const cards = [
+      ["resources", summary.total_resources, "Total resources", "Inventory across supported services"],
+      ["running", summary.running_resources, "Running resources", "Currently active or healthy"],
+      ["broken", summary.broken_resources, "Broken resources", "Alarms, drift, failed checks"],
+      ["cost", formatMoney(summary.monthly_cost_estimate, currency), "Monthly estimate", "Projected AWS spend"],
+      ["plan", summary.pending_agent_actions, "Agent next actions", "Planned or executing work"],
+      ["approval", summary.pending_approvals, "Pending approvals", "Waiting for your review"],
+    ];
+    return `
+      <section class="summary-grid summary-grid--six" aria-label="Dashboard summary">
+        ${cards.map(([key, value, label, helper]) => `
+          <article class="summary-card summary-card--${key}">
+            <span class="summary-card__icon" aria-hidden="true">${icons[key]}</span>
+            <div class="summary-card__content">
+              <p class="summary-card__label">${escapeHtml(label)}</p>
+              <p class="summary-card__value">${escapeHtml(value)}</p>
+              <p class="summary-card__detail">${escapeHtml(helper)}</p>
+            </div>
+          </article>
+        `).join("")}
+      </section>
+    `;
+  }
+
+  function panel(title, subtitle, body, className = "") {
+    return `
+      <section class="dashboard-panel ${className}">
+        <header class="dashboard-panel__header">
+          <h2>${escapeHtml(title)}</h2>
+          ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
+        </header>
+        ${body}
+      </section>
+    `;
+  }
+
+  function inventorySection(resources) {
+    const services = ["all", ...Array.from(new Set(resources.map((resource) => resource.service))).sort()];
+    const query = state.search.trim().toLowerCase();
+    const visible = resources.filter((resource) => {
+      const matchesService = state.serviceFilter === "all" || resource.service === state.serviceFilter;
+      const matchesQuery = !query || JSON.stringify(resource).toLowerCase().includes(query);
+      return matchesService && matchesQuery;
+    });
+    const toolbar = `
+      <div class="dashboard-toolbar">
+        <label>
+          <span class="sr-only">Search resources</span>
+          <input class="input" type="search" value="${escapeHtml(state.search)}" placeholder="Search resources" data-dashboard-search>
+        </label>
+        <label>
+          <span class="sr-only">Filter by service</span>
+          <select class="select" data-dashboard-service-filter>
+            ${services.map((service) => `<option value="${escapeHtml(service)}"${state.serviceFilter === service ? " selected" : ""}>${escapeHtml(service === "all" ? "All services" : service)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+    `;
+    const rows = visible.map((resource) => `
       <tr>
-        <td>
-          <strong class="instance-name" title="${escapeHtml(instance.id)}">${escapeHtml(instance.name || instance.id || "Unnamed")}</strong>
-        </td>
-        <td><code>${escapeHtml(instance.type || "\u2014")}</code></td>
-        <td><span class="state-badge state-badge--${stateClass(instance.state)}">${escapeHtml(instance.state || "unknown")}</span></td>
-        <td><code>${escapeHtml(instance.region || data.region || "\u2014")}</code></td>
-        <td class="launch-time">${escapeHtml(formatLaunchTime(instance.launch_time))}</td>
+        <td><strong>${escapeHtml(resource.name)}</strong><code>${escapeHtml(resource.id)}</code></td>
+        <td>${escapeHtml(resource.service)}</td>
+        <td>${escapeHtml(resource.type)}</td>
+        <td><code>${escapeHtml(resource.region)}</code></td>
+        <td>${badge(resource.status)}</td>
+        <td>${badge(resource.cost_impact, "state-badge--compact")}</td>
+        <td>${escapeHtml(formatDate(resource.created_at))}</td>
       </tr>
     `).join("");
-
-    element.innerHTML = `
-      <header class="dashboard-panel__header dashboard-panel__header--inline">
-        <h2>EC2 Instances</h2>
-        <a href="#resource-explorer" data-route="resource-explorer">View all <span aria-hidden="true">\u2192</span></a>
-      </header>
+    const body = `
+      ${toolbar}
       <div class="dashboard-table-wrap">
-        ${instances.length ? `
+        ${visible.length ? `
           <table class="dashboard-table">
-            <thead><tr><th>Name</th><th>Type</th><th>State</th><th>Region</th><th>Launch time</th></tr></thead>
+            <thead><tr><th>Name</th><th>Service</th><th>Type</th><th>Region</th><th>Status</th><th>Cost Impact</th><th>Created At</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
-        ` : '<p class="dashboard-empty">No EC2 instances were found in this region.</p>'}
+        ` : '<p class="dashboard-empty">No resources match this view.</p>'}
       </div>
     `;
+    return panel("What Exists", "Resource inventory normalized across AWS services.", body, "dashboard-panel--wide");
   }
 
-  function timeAgo(value) {
-    const timestamp = new Date(value).getTime();
-    if (!Number.isFinite(timestamp)) {
-      return "Recently";
-    }
-    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-    if (seconds < 60) return "Just now";
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-    return new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  function runningSection(items) {
+    const rows = items.map((item) => `
+      <tr>
+        <td><strong>${escapeHtml(item.name)}</strong><code>${escapeHtml(item.id)}</code></td>
+        <td>${escapeHtml(item.service)}</td>
+        <td>${badge(item.current_state)}</td>
+        <td>${badge(item.health)}</td>
+        <td><code>${escapeHtml(item.region)}</code></td>
+      </tr>
+    `).join("");
+    return panel(
+      "What Is Running",
+      "Active services and current health.",
+      `<div class="dashboard-table-wrap">${items.length ? `
+        <table class="dashboard-table">
+          <thead><tr><th>Resource</th><th>Service</th><th>Current State</th><th>Health</th><th>Region</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      ` : '<p class="dashboard-empty">No running resources detected.</p>'}</div>`,
+    );
   }
 
-  function readActions() {
-    try {
-      const value = JSON.parse(localStorage.getItem(ACTIONS_KEY) || "[]");
-      return Array.isArray(value) ? value : [];
-    } catch {
-      return [];
-    }
+  function brokenSection(items) {
+    const rows = items.map((item) => `
+      <tr>
+        <td>${badge(item.severity)}</td>
+        <td><strong>${escapeHtml(item.name)}</strong><code>${escapeHtml(item.id)}</code></td>
+        <td>${escapeHtml(item.service)}</td>
+        <td>${escapeHtml(item.problem)}</td>
+        <td>${escapeHtml(item.recommended_fix)}</td>
+        <td>${escapeHtml(item.source)}</td>
+      </tr>
+    `).join("");
+    return panel(
+      "What Is Broken",
+      "Alarms, failed checks, degraded services, and failed deployments.",
+      `<div class="dashboard-table-wrap">${items.length ? `
+        <table class="dashboard-table dashboard-table--wrap">
+          <thead><tr><th>Severity</th><th>Resource</th><th>Service</th><th>Problem</th><th>Recommended Fix</th><th>Source</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      ` : '<p class="dashboard-empty dashboard-empty--positive">No broken resources detected.</p>'}</div>`,
+      "dashboard-panel--wide",
+    );
   }
 
-  function renderActions() {
-    const element = sectionElement("actions");
-    if (!element || !isMounted()) {
-      return;
-    }
-    const actions = readActions()
-      .sort((left, right) => new Date(right.timestamp || right.created_at || 0) - new Date(left.timestamp || left.created_at || 0))
-      .slice(0, 5);
-    const rows = actions.map((action) => {
-      const status = String(action.status || action.phase || "completed").toLowerCase();
-      return `
-        <li class="action-row">
-          <span class="action-row__icon">${icons.action}</span>
-          <div class="action-row__content">
-            <strong>${escapeHtml(action.summary || action.action || action.message || "AWS automation executed")}</strong>
-            <small>${escapeHtml(timeAgo(action.timestamp || action.created_at || action.time))}</small>
+  function costSection(costs) {
+    const currency = costs.currency || "USD";
+    return panel(
+      "What It Costs",
+      "Cost Explorer trends by service and day.",
+      `
+        <div class="dashboard-cost-metrics">
+          <div><span>Today</span><strong>${escapeHtml(formatMoney(costs.today, currency))}</strong></div>
+          <div><span>Month to date</span><strong>${escapeHtml(formatMoney(costs.month_to_date, currency))}</strong></div>
+          <div><span>Monthly estimate</span><strong>${escapeHtml(formatMoney(costs.monthly_estimate, currency))}</strong></div>
+        </div>
+        <div class="dashboard-chart-grid">
+          <div>
+            <h3>Cost by service</h3>
+            ${serviceBars(costs.by_service || [], currency)}
           </div>
-          <span class="state-badge state-badge--${stateClass(status === "completed" || status === "done" ? "running" : status)}">${escapeHtml(status)}</span>
-        </li>
-      `;
-    }).join("");
+          <div>
+            <h3>Daily trend</h3>
+            ${dailyBars(costs.daily_trend || [], currency)}
+          </div>
+        </div>
+      `,
+      "dashboard-panel--wide",
+    );
+  }
 
-    element.innerHTML = `
-      <header class="dashboard-panel__header"><h2>Recent Actions</h2></header>
-      <div class="dashboard-panel__body dashboard-panel__body--actions">
-        ${actions.length
-          ? `<ul class="action-feed">${rows}</ul>`
-          : '<p class="dashboard-empty">No agent executions yet. Completed actions will appear here.</p>'}
+  function serviceBars(items, currency) {
+    if (!items.length) return '<p class="dashboard-empty">No service cost data available.</p>';
+    const max = Math.max(...items.map((item) => Number(item.amount || 0)), 0.01);
+    return `<ul class="dashboard-bars">${items.map((item) => `
+      <li>
+        <span>${escapeHtml(item.service)}</span>
+        <div><i style="width: ${Math.max(4, (Number(item.amount || 0) / max) * 100).toFixed(2)}%"></i></div>
+        <strong>${escapeHtml(formatMoney(item.amount, currency))}</strong>
+      </li>
+    `).join("")}</ul>`;
+  }
+
+  function dailyBars(items, currency) {
+    if (!items.length) return '<p class="dashboard-empty">No daily trend data available.</p>';
+    const max = Math.max(...items.map((item) => Number(item.amount || 0)), 0.01);
+    return `
+      <div class="dashboard-trend" role="img" aria-label="Daily cost trend">
+        ${items.map((item) => `
+          <span style="height: ${Math.max(2, (Number(item.amount || 0) / max) * 100).toFixed(2)}%" title="${escapeHtml(item.date)}: ${escapeHtml(formatMoney(item.amount, currency))}"></span>
+        `).join("")}
       </div>
     `;
   }
 
-  async function loadSummary() {
-    const element = sectionElement("summary");
-    if (element) element.innerHTML = summarySkeleton();
+  function agentPlanSection(items) {
+    const rows = items.map((item) => `
+      <tr>
+        <td><strong>${escapeHtml(item.title)}</strong><code>${escapeHtml(item.plan_id)}</code></td>
+        <td>${escapeHtml(titleCase(item.action_type))}</td>
+        <td>${escapeHtml((item.target_services || []).join(", ") || "-")}</td>
+        <td>${badge(item.risk_level)}</td>
+        <td>${escapeHtml(formatMoney(item.estimated_cost, state.data?.costs?.currency))}</td>
+        <td>${badge(item.status)}</td>
+        <td>${escapeHtml(formatDate(item.created_at))}</td>
+      </tr>
+    `).join("");
+    return panel(
+      "What The Agent Plans Next",
+      "Queued infrastructure changes.",
+      `<div class="dashboard-table-wrap">${items.length ? `
+        <table class="dashboard-table">
+          <thead><tr><th>Plan</th><th>Action</th><th>Target Services</th><th>Risk</th><th>Estimated Cost</th><th>Status</th><th>Created At</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      ` : '<p class="dashboard-empty">No pending agent actions.</p>'}</div>`,
+      "dashboard-panel--wide",
+    );
+  }
+
+  function approvalsSection(items) {
+    const cards = items.map((item) => `
+      <article class="approval-card">
+        <header>
+          <div>
+            <h3>${escapeHtml(item.summary || item.user_prompt || "Pending approval")}</h3>
+            <p>${escapeHtml(item.user_prompt)}</p>
+          </div>
+          ${badge(item.risk_level)}
+        </header>
+        <dl>
+          <div><dt>Create</dt><dd>${escapeHtml((item.services_to_create || []).join(", ") || "None")}</dd></div>
+          <div><dt>Modify</dt><dd>${escapeHtml((item.services_to_modify || []).join(", ") || "None")}</dd></div>
+          <div><dt>Delete</dt><dd>${escapeHtml((item.services_to_delete || []).join(", ") || "None")}</dd></div>
+          <div><dt>Monthly Cost</dt><dd>${escapeHtml(formatMoney(item.estimated_monthly_cost, state.data?.costs?.currency))}</dd></div>
+        </dl>
+        <div class="approval-card__actions">
+          <button class="button button--primary" type="button" disabled>Approve</button>
+          <button class="button button--secondary" type="button" disabled>Reject</button>
+          <button class="button button--secondary" type="button" disabled>Edit Plan</button>
+        </div>
+      </article>
+    `).join("");
+    return panel(
+      "What Needs User Approval",
+      "Plans waiting for review.",
+      items.length ? `<div class="approval-grid">${cards}</div>` : '<p class="dashboard-empty dashboard-empty--positive">No plans need approval.</p>',
+      "dashboard-panel--wide",
+    );
+  }
+
+  function activitySection(items) {
+    const rows = items.map((item) => `
+      <li class="action-row">
+        <span class="action-row__icon">${icons.plan}</span>
+        <div class="action-row__content">
+          <strong>${escapeHtml(item.title)}</strong>
+          <small>${escapeHtml(item.description)}</small>
+        </div>
+        <span>${badge(item.status)}</span>
+        <time>${escapeHtml(formatDate(item.timestamp))}</time>
+      </li>
+    `).join("");
+    return panel(
+      "Recent Activity",
+      "Plans, deployments, discovered resources, warnings, and cost signals.",
+      items.length ? `<ul class="action-feed dashboard-activity-feed">${rows}</ul>` : '<p class="dashboard-empty">No recent activity yet.</p>',
+      "dashboard-panel--wide",
+    );
+  }
+
+  async function loadDashboard() {
+    state.loading = true;
+    state.error = "";
+    renderBody();
     try {
-      const data = await global.api.request(
+      state.data = await global.api.request(
         "GET",
-        `/dashboard/summary?region=${encodeURIComponent(activeRegion())}`,
+        `/dashboard?region=${encodeURIComponent(activeRegion())}`,
       );
-      renderSummary(data);
     } catch (error) {
-      renderError("summary", error);
+      state.error = error.message || "The dashboard API request failed.";
+    } finally {
+      state.loading = false;
+      renderBody();
     }
   }
-
-  async function loadCosts() {
-    const element = sectionElement("costs");
-    if (element) element.innerHTML = panelSkeleton("chart");
-    try {
-      renderCosts(await global.api.request("GET", "/dashboard/costs"));
-    } catch (error) {
-      renderError("costs", error);
-    }
-  }
-
-  async function loadEc2() {
-    const element = sectionElement("ec2");
-    if (element) element.innerHTML = panelSkeleton("table");
-    try {
-      const data = await global.api.request(
-        "GET",
-        `/dashboard/ec2?region=${encodeURIComponent(activeRegion())}&limit=10`,
-      );
-      renderInstances(data);
-    } catch (error) {
-      renderError("ec2", error);
-    }
-  }
-
-  function loadActions() {
-    const element = sectionElement("actions");
-    if (element) element.innerHTML = panelSkeleton("actions");
-    window.setTimeout(renderActions, 80);
-  }
-
-  Object.assign(sectionLoaders, {
-    summary: loadSummary,
-    costs: loadCosts,
-    ec2: loadEc2,
-    actions: loadActions,
-  });
 
   function mount() {
-    loadSummary();
-    loadCosts();
-    loadEc2();
-    loadActions();
+    loadDashboard();
   }
 
   function reloadRegion() {
     if (isMounted()) {
-      loadSummary();
-      loadEc2();
+      loadDashboard();
     }
   }
 
   document.addEventListener("click", (event) => {
-    const retry = event.target.closest("[data-dashboard-retry]");
-    if (retry) {
-      sectionLoaders[retry.dataset.dashboardRetry]?.();
+    if (!isMounted()) return;
+    if (event.target.closest('[data-dashboard-action="retry"]')) {
+      loadDashboard();
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    if (!isMounted()) return;
+    if (event.target.matches("[data-dashboard-search]")) {
+      state.search = event.target.value;
+      renderBody();
+      document.querySelector("[data-dashboard-search]")?.focus();
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    if (!isMounted()) return;
+    if (event.target.matches("[data-dashboard-service-filter]")) {
+      state.serviceFilter = event.target.value;
+      renderBody();
     }
   });
 

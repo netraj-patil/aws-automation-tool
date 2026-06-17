@@ -10,7 +10,8 @@ from app.models.blueprint_models import (
     SecurityReview,
     SecurityWarning,
 )
-from app.routes import blueprint_routes
+from app.routes import blueprint_routes, deployment_routes
+from app.services.deployment_store import DeploymentStore
 from app.services.blueprint_store import BlueprintStore
 
 
@@ -23,7 +24,15 @@ def store(monkeypatch) -> BlueprintStore:
 
 
 @pytest.fixture
-def client(store: BlueprintStore) -> TestClient:
+def deployments(monkeypatch) -> DeploymentStore:
+    store = DeploymentStore()
+    monkeypatch.setattr(blueprint_routes, "deployment_store", store)
+    monkeypatch.setattr(deployment_routes, "deployment_store", store)
+    return store
+
+
+@pytest.fixture
+def client(store: BlueprintStore, deployments: DeploymentStore) -> TestClient:
     return TestClient(app)
 
 
@@ -210,6 +219,138 @@ def test_approved_blueprint_can_execute(client: TestClient) -> None:
     assert payload["status"] == "deployed"
     assert "Deployment dry-run completed" in payload["logs"]
     assert {resource["resource_id"] for resource in payload["planned_resources"]}
+    assert payload["error"] is None
+
+
+def test_approved_blueprint_without_credentials_does_not_use_env_chain(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy Lambda behind API Gateway"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    response = client.post(f"/api/v1/blueprints/{blueprint_id}/execute")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "AWS credentials required"
+
+
+def test_execution_creates_deployment_record(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy Lambda behind API Gateway"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    execute_response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+    deployment_id = execute_response.json()["deployment_id"]
+    get_response = client.get(f"/api/v1/deployments/{deployment_id}")
+
+    assert execute_response.status_code == 200
+    assert get_response.status_code == 200
+    assert get_response.json()["deployment_id"] == deployment_id
+    assert get_response.json()["blueprint_id"] == blueprint_id
+
+
+def test_deployment_logs_are_returned_in_order(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={
+            "prompt": (
+                "Deploy a production-ready FastAPI app with PostgreSQL, "
+                "S3 storage, and HTTPS."
+            )
+        },
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+
+    assert response.status_code == 200
+    logs = response.json()["logs"]
+    assert logs[:3] == [
+        "Validating blueprint",
+        "Checking approval",
+        "Reviewing security warnings",
+    ]
+    assert logs.index("Preparing load balancer") < logs.index(
+        "Deployment dry-run completed"
+    )
+    assert logs.index("Preparing compute resources") < logs.index(
+        "Deployment dry-run completed"
+    )
+    assert logs[-1] == "Deployment dry-run completed"
+
+
+def test_successful_execution_stores_deployed_status(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy private VPC"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+    deployment = client.get(
+        f"/api/v1/deployments/{response.json()['deployment_id']}"
+    ).json()
+
+    assert response.status_code == 200
+    assert deployment["status"] == "deployed"
+
+
+def test_failed_execution_stores_failed_status_and_error(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy Lambda behind API Gateway"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+
+    def fail_dry_run(*args, **kwargs):
+        raise RuntimeError("simulated execution failure")
+
+    monkeypatch.setattr(
+        blueprint_routes.blueprint_executor,
+        "dry_run",
+        fail_dry_run,
+    )
+
+    response = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    )
+    history = client.get(
+        f"/api/v1/blueprints/{blueprint_id}/deployments"
+    ).json()
+
+    assert response.status_code == 500
+    assert history[0]["status"] == "failed"
+    assert history[0]["error"] == "simulated execution failure"
+    assert history[0]["logs"][-1] == "simulated execution failure"
 
 
 def test_high_risk_blueprint_blocks_without_override(
@@ -247,6 +388,27 @@ def test_high_risk_blueprint_executes_with_override(
     assert payload["status"] == "deployed"
     assert "High-risk override accepted for dry-run execution" in payload["logs"]
     assert store.get(blueprint.blueprint_id).status == "deployed"
+
+
+def test_blueprint_deployment_history_returns_records(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/v1/blueprints/generate",
+        json={"prompt": "Deploy Lambda behind API Gateway"},
+    ).json()
+    blueprint_id = created["blueprint_id"]
+    client.post(f"/api/v1/blueprints/{blueprint_id}/approve")
+    deployment = client.post(
+        f"/api/v1/blueprints/{blueprint_id}/execute",
+        headers=AWS_HEADERS,
+    ).json()
+
+    response = client.get(f"/api/v1/blueprints/{blueprint_id}/deployments")
+
+    assert response.status_code == 200
+    assert response.json()[0]["deployment_id"] == deployment["deployment_id"]
+    assert response.json()[0]["blueprint_id"] == blueprint_id
 
 
 def test_execution_updates_status_and_returns_logs(
@@ -287,6 +449,16 @@ def test_missing_blueprint_execute_returns_404(client: TestClient) -> None:
     assert response.json() == {
         "error": "Blueprint not found",
         "detail": "bp_missing",
+    }
+
+
+def test_unknown_deployment_id_returns_404(client: TestClient) -> None:
+    response = client.get("/api/v1/deployments/dep_missing")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "Deployment not found",
+        "detail": "dep_missing",
     }
 
 
