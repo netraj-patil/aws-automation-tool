@@ -10,6 +10,7 @@ from app.services.blueprint_store import (
     InvalidBlueprintTransitionError,
     blueprint_store,
 )
+from app.services.blueprint_planner import blueprint_planner
 
 
 router = APIRouter(prefix="/api/v1/blueprints", tags=["blueprints"])
@@ -47,8 +48,9 @@ def _invalid_transition(exc: InvalidBlueprintTransitionError) -> HTTPException:
 def generate_blueprint(
     request: GenerateBlueprintRequest,
 ) -> DeploymentBlueprint:
-    """Create a placeholder draft blueprint from a natural language prompt."""
-    return blueprint_store.create_from_prompt(request.prompt)
+    """Create a draft blueprint from a natural language prompt."""
+    blueprint = blueprint_planner.generate(request.prompt)
+    return blueprint_store.add(blueprint)
 
 
 @router.get(

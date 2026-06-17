@@ -51,6 +51,11 @@ class BlueprintStore:
         self._blueprints[blueprint_id] = blueprint
         return self._copy_blueprint(blueprint)
 
+    def add(self, blueprint: DeploymentBlueprint) -> DeploymentBlueprint:
+        """Store an already-generated deployment blueprint."""
+        self._blueprints[blueprint.blueprint_id] = self._copy_blueprint(blueprint)
+        return self._copy_blueprint(blueprint)
+
     def get(self, blueprint_id: str) -> DeploymentBlueprint:
         """Return a copy of the requested blueprint."""
         blueprint = self._blueprints.get(blueprint_id)

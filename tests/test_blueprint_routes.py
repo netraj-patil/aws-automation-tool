@@ -11,6 +11,7 @@ from app.services.blueprint_store import BlueprintStore
 @pytest.fixture
 def client(monkeypatch) -> TestClient:
     store = BlueprintStore()
+    monkeypatch.delenv("BLUEPRINT_PLANNER_MODE", raising=False)
     monkeypatch.setattr(blueprint_routes, "blueprint_store", store)
     return TestClient(app)
 
@@ -18,15 +19,31 @@ def client(monkeypatch) -> TestClient:
 def test_generate_blueprint(client: TestClient) -> None:
     response = client.post(
         "/api/v1/blueprints/generate",
-        json={"prompt": "Deploy an S3 static website"},
+        json={
+            "prompt": (
+                "Deploy a production-ready FastAPI app with PostgreSQL, "
+                "S3 storage, and HTTPS."
+            )
+        },
     )
 
     assert response.status_code == 200
     payload = response.json()
+    resource_ids = {resource["id"] for resource in payload["resources"]}
     assert payload["blueprint_id"].startswith("bp_")
     assert payload["status"] == "draft"
-    assert payload["user_prompt"] == "Deploy an S3 static website"
-    assert payload["estimated_cost"]["estimated_monthly_total"] == 0
+    assert payload["user_prompt"] == (
+        "Deploy a production-ready FastAPI app with PostgreSQL, "
+        "S3 storage, and HTTPS."
+    )
+    assert {
+        "app-compute",
+        "postgres-database",
+        "object-storage",
+        "https-load-balancer",
+        "monitoring",
+    } <= resource_ids
+    assert payload["estimated_cost"]["estimated_monthly_total"] > 0
     assert payload["security_review"]["passed"] is True
 
 
