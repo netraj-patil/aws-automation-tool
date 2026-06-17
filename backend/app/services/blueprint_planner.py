@@ -159,6 +159,7 @@ class BlueprintPlanner:
                         "engine": "postgres",
                         "multi_az": include_monitoring,
                         "storage_gb": 20,
+                        "backup_retention_days": 7 if include_monitoring else 0,
                     },
                     visibility="private",
                     estimated_monthly_cost=65,

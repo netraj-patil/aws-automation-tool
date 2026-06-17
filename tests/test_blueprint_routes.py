@@ -52,8 +52,17 @@ def test_generate_blueprint(client: TestClient) -> None:
         "node_app_compute --> node_postgres_database"
         in payload["diagram_mermaid"]
     )
-    assert payload["estimated_cost"]["estimated_monthly_total"] > 0
+    assert payload["estimated_cost"]["estimated_monthly_total"] == 46
+    assert payload["estimated_cost"]["breakdown"] == {
+        "app-compute": 8.0,
+        "postgres-database": 15.0,
+        "object-storage": 2.0,
+        "https-load-balancer": 18.0,
+        "monitoring": 3.0,
+    }
+    assert payload["security_review"]["security_score"] == 100
     assert payload["security_review"]["passed"] is True
+    assert payload["security_review"]["warnings"] == []
 
 
 def test_get_blueprint(client: TestClient) -> None:

@@ -7,6 +7,7 @@ from pydantic import (
     BaseModel,
     Field,
     NonNegativeFloat,
+    conint,
     root_validator,
 )
 
@@ -61,6 +62,7 @@ class SecurityReview(StrictBlueprintModel):
     """Security summary for a blueprint before deployment."""
 
     risk_level: RiskLevel
+    security_score: conint(ge=0, le=100) = 100
     passed: bool
     warnings: list[SecurityWarning] = Field(default_factory=list)
     summary: str = ""

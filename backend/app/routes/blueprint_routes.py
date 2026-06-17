@@ -11,6 +11,8 @@ from app.services.blueprint_store import (
     blueprint_store,
 )
 from app.services.blueprint_planner import blueprint_planner
+from app.services.cost_service import cost_service
+from app.services.security_service import security_service
 
 
 router = APIRouter(prefix="/api/v1/blueprints", tags=["blueprints"])
@@ -50,6 +52,8 @@ def generate_blueprint(
 ) -> DeploymentBlueprint:
     """Create a draft blueprint from a natural language prompt."""
     blueprint = blueprint_planner.generate(request.prompt)
+    blueprint = cost_service.estimate(blueprint)
+    blueprint = security_service.review(blueprint)
     return blueprint_store.add(blueprint)
 
 
