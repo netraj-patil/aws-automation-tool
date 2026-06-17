@@ -18,6 +18,7 @@ load_dotenv(PROJECT_ENV_FILE, override=True)
 
 from app.routes.agent_routes import router as agent_router
 from app.routes.auth_routes import router as auth_router
+from app.routes.blueprint_routes import router as blueprint_router
 from app.routes.dashboard_routes import router as dashboard_router
 from app.routes.resource_routes import router as resource_router
 from app.services.session_store import session_store
@@ -63,6 +64,7 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(agent_router)
+app.include_router(blueprint_router)
 app.include_router(dashboard_router)
 app.include_router(resource_router)
 
